@@ -43,7 +43,33 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 * Initialize hooks.
 	 */
 	public function hooks() {
-		// Intentionally empty, token methods are called directly.
+		// Preview requests
+		add_action( 'init', array( $this, 'preview_request_hooks' ), 100 ); // Late so the hooks removed from other plugins are already registered
+	}
+
+	/**
+	 * Add or remove preview request hooks.
+	 */
+	public function preview_request_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Response headers
+		remove_action( 'template_redirect', 'wc_send_frame_options_header', 10 ); // Replaced by the `frame-ancestors` policy, which also allows the admin origin
+		add_filter( 'wp_headers', array( $this, 'add_preview_headers' ), 100 ); // Late to override values set by other plugins
+
+		// Admin bar
+		add_filter( 'show_admin_bar', '__return_false', 10 );
+
+		// Empty cart
+		add_filter( 'woocommerce_checkout_redirect_empty_cart', '__return_false', 10 );
+		add_filter( 'woocommerce_checkout_update_order_review_expired', '__return_false', 10 );
+
+		// Coming soon mode
+		add_filter( 'woocommerce_coming_soon_exclude', '__return_true', 10 );
+
+		// AJAX
+		add_filter( 'woocommerce_ajax_get_endpoint', array( $this, 'add_token_to_ajax_endpoint' ), 10 );
 	}
 
 
@@ -142,6 +168,66 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		}
 
 		return $this->is_preview_request;
+	}
+
+
+
+	/**
+	 * Get the admin origin, as `{scheme}://{host}` with the port when present.
+	 *
+	 * @return  string
+	 */
+	public function get_admin_origin() {
+		// Get admin URL parts
+		$admin_url_parts = wp_parse_url( admin_url() );
+
+		// Bail if admin URL has no origin
+		if ( empty( $admin_url_parts[ 'scheme' ] ) || empty( $admin_url_parts[ 'host' ] ) ) { return ''; }
+
+		// Get admin origin
+		$admin_origin = $admin_url_parts[ 'scheme' ] . '://' . $admin_url_parts[ 'host' ];
+
+		// Maybe add the port
+		if ( array_key_exists( 'port', $admin_url_parts ) ) {
+			$admin_origin .= ':' . $admin_url_parts[ 'port' ];
+		}
+
+		return $admin_origin;
+	}
+
+
+
+	/**
+	 * Add the response headers for preview requests.
+	 *
+	 * @param   array  $headers  Response headers.
+	 */
+	public function add_preview_headers( $headers ) {
+		// Prevent caching, as preview pages must never be served to visitors
+		WC_Cache_Helper::set_nocache_constants();
+		$headers = array_merge( $headers, wp_get_nocache_headers() );
+
+		// Keep preview pages out of search engines, and the token out of referrers sent to other domains
+		$headers[ 'X-Robots-Tag' ] = 'noindex, nofollow';
+		$headers[ 'Referrer-Policy' ] = 'same-origin';
+
+		// Only allow the frontend and the admin to load preview pages in a frame
+		$headers[ 'Content-Security-Policy' ] = "frame-ancestors 'self' " . $this->get_admin_origin();
+
+		return $headers;
+	}
+
+	/**
+	 * Add the preview token to WooCommerce AJAX endpoint URLs.
+	 *
+	 * @param   string  $url  AJAX endpoint URL.
+	 */
+	public function add_token_to_ajax_endpoint( $url ) {
+		// Get query string separator
+		$separator = false === strpos( $url, '?' ) ? '?' : '&';
+
+		// Append the token directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
+		return $url . $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
 	}
 
 }
