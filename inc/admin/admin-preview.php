@@ -69,6 +69,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Preview session
 		$this->preview_session_hooks();
 
+		// Preview guards
+		$this->preview_guard_hooks();
+
 		// Preview cart
 		$this->preview_cart_hooks();
 	}
@@ -97,6 +100,33 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		add_filter( 'add_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
 		add_filter( 'update_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
 		add_filter( 'delete_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+	}
+
+	/**
+	 * Add or remove hooks that stop preview requests from placing orders, logging in, adding to cart and sending emails.
+	 * Registered when the class loads, so they also apply to requests handled before `init` finishes.
+	 */
+	public function preview_guard_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Orders and payments
+		add_action( 'woocommerce_before_checkout_process', array( $this, 'prevent_checkout_processing' ), 10 );
+		add_action( 'woocommerce_before_order_object_save', array( $this, 'maybe_prevent_new_order_save' ), 10 ); // Last resort for orders saved outside checkout processing, such as by express payment endpoints
+		add_filter( 'rest_pre_dispatch', array( $this, 'maybe_prevent_store_api_checkout' ), 10, 3 );
+
+		// Logins and accounts
+		add_filter( 'woocommerce_process_login_errors', array( $this, 'add_login_error' ), 10 ); // Stops login forms before authentication, so attempts do not count as failed logins
+		add_filter( 'authenticate', array( $this, 'prevent_login' ), PHP_INT_MAX ); // Last resort for other login forms, last to override users authenticated by other filters
+		add_filter( 'woocommerce_registration_errors', array( $this, 'add_registration_error' ), 10 );
+		add_filter( 'send_auth_cookies', '__return_false', 10 ); // Required to keep the visitor's own login cookies, as preview pages share the domain
+
+		// Add to cart
+		add_filter( 'woocommerce_add_to_cart_validation', '__return_false', PHP_INT_MAX ); // Last, to refuse add-to-cart forms and AJAX, so add-to-cart events do not reach analytics and marketing plugins
+		add_filter( 'woocommerce_cart_redirect_after_error', array( $this, 'get_add_to_cart_error_redirect_url' ), 10 ); // Required to keep the frame in the preview, as scripts open this URL when adding to cart fails
+
+		// Emails
+		add_filter( 'pre_wp_mail', '__return_false', 10 ); // Required as preview requests must not send emails
 	}
 
 	/**
@@ -136,8 +166,26 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Coming soon mode
 		add_filter( 'woocommerce_coming_soon_exclude', '__return_true', 10 );
 
-		// AJAX
-		add_filter( 'woocommerce_ajax_get_endpoint', array( $this, 'add_preview_args_to_ajax_endpoint' ), 10 );
+		// URLs that stay inside the preview
+		add_filter( 'woocommerce_ajax_get_endpoint', array( $this, 'add_preview_args_to_url' ), 10 );
+		add_filter( 'woocommerce_get_checkout_url', array( $this, 'add_preview_args_to_url' ), 10 ); // Required as the checkout form posts to this URL without JavaScript
+		add_filter( 'woocommerce_get_cart_url', array( $this, 'add_preview_args_to_url' ), 10 );
+		add_filter( 'wp_redirect', array( $this, 'maybe_add_preview_args_to_redirect' ), 10 );
+
+		// Orders and payments
+		remove_action( 'wp', array( 'WC_Form_Handler', 'pay_action' ), 20 );
+		remove_action( 'wp_loaded', array( 'WC_Form_Handler', 'cancel_order' ), 20 );
+		remove_action( 'wp', array( 'WC_Form_Handler', 'add_payment_method_action' ), 20 );
+		remove_action( 'wp', array( 'WC_Form_Handler', 'delete_payment_method_action' ), 20 );
+		remove_action( 'wp', array( 'WC_Form_Handler', 'set_default_payment_method_action' ), 20 );
+
+		// Accounts
+		remove_action( 'wp_loaded', array( 'WC_Form_Handler', 'process_lost_password' ), 20 );
+		remove_action( 'wp_loaded', array( 'WC_Form_Handler', 'process_reset_password' ), 20 );
+		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'redirect_reset_password_link' ), 10 );
+		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'resend_set_password' ), 10 );
+		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'save_address' ), 10 );
+		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'save_account_details' ), 10 );
 	}
 
 
@@ -299,23 +347,144 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	}
 
 	/**
-	 * Add the preview token and mode to WooCommerce AJAX endpoint URLs.
+	 * Add the preview token and mode to a URL, so requests to it are also preview requests.
 	 *
-	 * @param   string  $url  AJAX endpoint URL.
+	 * @param   string  $url  URL, such as the WooCommerce AJAX endpoint URL.
 	 */
-	public function add_preview_args_to_ajax_endpoint( $url ) {
+	public function add_preview_args_to_url( $url ) {
+		// Get URL query arguments
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query_args );
+
+		// Bail if the URL already has the preview token
+		if ( array_key_exists( self::TOKEN_QUERY_ARG, $query_args ) ) { return $url; }
+
+		// Split off the fragment, so the arguments go into the query string
+		$url_parts = explode( '#', $url, 2 );
+
 		// Get query string separator
-		$separator = false === strpos( $url, '?' ) ? '?' : '&';
+		$separator = false === strpos( $url_parts[ 0 ], '?' ) ? '?' : '&';
 
-		// Append the token directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
-		$url .= $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
+		// Define the token argument directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
+		$preview_args = $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
 
-		// Maybe append the logged-in mode
+		// Maybe add the logged-in mode
 		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
-			$url .= '&' . self::MODE_QUERY_ARG . '=' . self::MODE_LOGGED_IN;
+			$preview_args .= '&' . self::MODE_QUERY_ARG . '=' . self::MODE_LOGGED_IN;
 		}
 
-		return $url;
+		return $url_parts[ 0 ] . $preview_args . ( isset( $url_parts[ 1 ] ) ? '#' . $url_parts[ 1 ] : '' );
+	}
+
+	/**
+	 * Add the preview token and mode to redirects within the frontend, so the frame stays in the preview, like the WordPress Customizer does.
+	 *
+	 * @param   string  $location  Redirect URL.
+	 */
+	public function maybe_add_preview_args_to_redirect( $location ) {
+		// Bail if redirecting outside the frontend: to another site, the admin or the login page
+		if ( 0 !== strpos( $location, home_url( '/' ) ) || 0 === strpos( $location, admin_url() ) || 0 === strpos( $location, wp_login_url() ) ) { return $location; }
+
+		return $this->add_preview_args_to_url( $location );
+	}
+
+
+
+	/**
+	 * Get the message shown when an order is placed in the preview.
+	 *
+	 * @return  string
+	 */
+	public function get_orders_unavailable_message() {
+		return __( 'Orders cannot be placed in the preview.', 'fluid-checkout' );
+	}
+
+	/**
+	 * Get the message shown when logging in from the preview.
+	 *
+	 * @return  string
+	 */
+	public function get_login_unavailable_message() {
+		return __( 'Logging in is not available in the preview.', 'fluid-checkout' );
+	}
+
+	/**
+	 * Stop checkout processing, which WooCommerce shows as an error notice.
+	 *
+	 * @throws  Exception  Always, as orders cannot be placed from the preview.
+	 */
+	public function prevent_checkout_processing() {
+		throw new Exception( $this->get_orders_unavailable_message() );
+	}
+
+	/**
+	 * Stop saving new orders, which WooCommerce catches and logs before the order is created.
+	 *
+	 * @param   WC_Abstract_Order  $order  Order being saved.
+	 *
+	 * @throws  Exception  When the order is new, as preview requests must not create orders.
+	 */
+	public function maybe_prevent_new_order_save( $order ) {
+		// Bail if the order already exists, as WooCommerce would add an error note to it when stopping the save
+		if ( $order instanceof WC_Abstract_Order && $order->get_id() ) { return; }
+
+		throw new Exception( $this->get_orders_unavailable_message() );
+	}
+
+	/**
+	 * Reject Store API checkout requests, which create and place orders.
+	 *
+	 * @param   mixed            $result   Response to use instead of dispatching the request, `null` to dispatch it.
+	 * @param   WP_REST_Server   $server   REST server.
+	 * @param   WP_REST_Request  $request  REST request.
+	 */
+	public function maybe_prevent_store_api_checkout( $result, $server, $request ) {
+		// Bail if not a Store API checkout request, matched without case like WordPress matches routes
+		if ( ! preg_match( '#^/wc/store(/v\d+)?/checkout#i', $request->get_route() ) ) { return $result; }
+
+		return new WP_Error( 'fc_admin_preview_checkout', $this->get_orders_unavailable_message(), array( 'status' => 403 ) );
+	}
+
+	/**
+	 * Add an error to login form submissions, so WooCommerce and Fluid Checkout login forms stop before authentication.
+	 *
+	 * @param   WP_Error  $errors  Login errors.
+	 */
+	public function add_login_error( $errors ) {
+		$errors->add( 'fc_admin_preview_login', $this->get_login_unavailable_message() );
+
+		return $errors;
+	}
+
+	/**
+	 * Reject logins from other login forms, as logging in from the preview would change the visitor's own session.
+	 *
+	 * @param   WP_User|WP_Error|null  $user  Authenticated user, error, or `null` when not authenticated yet.
+	 */
+	public function prevent_login( $user ) {
+		return new WP_Error( 'fc_admin_preview_login', $this->get_login_unavailable_message() );
+	}
+
+	/**
+	 * Add an error to account registrations, so WooCommerce does not create customers from the preview.
+	 *
+	 * @param   WP_Error  $errors  Registration errors.
+	 */
+	public function add_registration_error( $errors ) {
+		$errors->add( 'fc_admin_preview_registration', __( 'Accounts cannot be created in the preview.', 'fluid-checkout' ) );
+
+		return $errors;
+	}
+
+	/**
+	 * Get the URL that scripts open when adding to cart fails: the preview page that sent the request.
+	 *
+	 * @param   string  $url  URL to open, the product page by default.
+	 */
+	public function get_add_to_cart_error_redirect_url( $url ) {
+		// Get the page that sent the request, which carries the preview token
+		$referer = wp_get_referer();
+
+		return false !== $referer ? $referer : wc_get_cart_url();
 	}
 
 
