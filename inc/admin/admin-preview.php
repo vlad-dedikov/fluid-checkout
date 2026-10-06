@@ -22,6 +22,26 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	const TOKEN_LIFETIME = DAY_IN_SECONDS;
 
 	/**
+	 * Query argument that carries the preview mode.
+	 */
+	const MODE_QUERY_ARG = 'fc_preview_mode';
+
+	/**
+	 * Preview mode that renders pages for a guest.
+	 */
+	const MODE_GUEST = 'guest';
+
+	/**
+	 * Preview mode that renders pages for the dummy logged-in customer.
+	 */
+	const MODE_LOGGED_IN = 'logged_in';
+
+	/**
+	 * User ID of the dummy logged-in customer, high enough to never belong to a real user.
+	 */
+	const DUMMY_CUSTOMER_ID = 2147483647;
+
+	/**
 	 * Whether the current request is a preview request, cached after first check.
 	 *
 	 * @var bool|null
@@ -45,6 +65,33 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	public function hooks() {
 		// Preview requests
 		add_action( 'init', array( $this, 'preview_request_hooks' ), 100 ); // Late so the hooks removed from other plugins are already registered
+
+		// Preview session
+		$this->preview_session_hooks();
+	}
+
+	/**
+	 * Add or remove preview session hooks.
+	 */
+	public function preview_session_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Preview customer
+		add_action( 'init', array( $this, 'switch_to_preview_customer' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
+
+		// Session
+		add_filter( 'woocommerce_session_handler', array( $this, 'get_session_handler_class' ), 100 ); // Late to override session handlers from other plugins
+		add_filter( 'woocommerce_persistent_cart_enabled', '__return_false', 10 );
+
+		// Cookies
+		add_filter( 'woocommerce_set_cookie_enabled', '__return_false', 10 ); // Required to keep the visitor's own session cookies unchanged when the preview is on the same domain
+
+		// Dummy customer meta
+		add_filter( 'get_user_metadata', array( $this, 'maybe_get_dummy_customer_meta' ), 10, 4 );
+		add_filter( 'add_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+		add_filter( 'update_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+		add_filter( 'delete_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
 	}
 
 	/**
@@ -69,7 +116,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		add_filter( 'woocommerce_coming_soon_exclude', '__return_true', 10 );
 
 		// AJAX
-		add_filter( 'woocommerce_ajax_get_endpoint', array( $this, 'add_token_to_ajax_endpoint' ), 10 );
+		add_filter( 'woocommerce_ajax_get_endpoint', array( $this, 'add_preview_args_to_ajax_endpoint' ), 10 );
 	}
 
 
@@ -170,6 +217,18 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		return $this->is_preview_request;
 	}
 
+	/**
+	 * Get the preview mode from the current request.
+	 *
+	 * @return  string  `logged_in` for the dummy logged-in customer, or `guest` otherwise.
+	 */
+	public function get_preview_mode() {
+		// Get requested mode
+		$mode = isset( $_GET[ self::MODE_QUERY_ARG ] ) ? sanitize_text_field( wp_unslash( $_GET[ self::MODE_QUERY_ARG ] ) ) : '';
+
+		return self::MODE_LOGGED_IN === $mode ? self::MODE_LOGGED_IN : self::MODE_GUEST;
+	}
+
 
 
 	/**
@@ -218,16 +277,144 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	}
 
 	/**
-	 * Add the preview token to WooCommerce AJAX endpoint URLs.
+	 * Add the preview token and mode to WooCommerce AJAX endpoint URLs.
 	 *
 	 * @param   string  $url  AJAX endpoint URL.
 	 */
-	public function add_token_to_ajax_endpoint( $url ) {
+	public function add_preview_args_to_ajax_endpoint( $url ) {
 		// Get query string separator
 		$separator = false === strpos( $url, '?' ) ? '?' : '&';
 
 		// Append the token directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
-		return $url . $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
+		$url .= $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
+
+		// Maybe append the logged-in mode
+		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
+			$url .= '&' . self::MODE_QUERY_ARG . '=' . self::MODE_LOGGED_IN;
+		}
+
+		return $url;
+	}
+
+
+
+	/**
+	 * Switch the current user to the preview customer: the dummy customer in logged-in mode, or a guest.
+	 */
+	public function switch_to_preview_customer() {
+		// Maybe use the dummy customer in logged-in mode
+		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
+			// Cache the dummy user in memory only, so WordPress and WooCommerce load it like a real user
+			wp_cache_add_non_persistent_groups( array( 'users' ) );
+			wp_cache_set( self::DUMMY_CUSTOMER_ID, $this->get_dummy_customer_user_data(), 'users' );
+
+			wp_set_current_user( self::DUMMY_CUSTOMER_ID );
+		}
+		// Otherwise, use a guest
+		else {
+			wp_set_current_user( 0 );
+		}
+	}
+
+	/**
+	 * Get the WooCommerce session customer ID for the preview request.
+	 *
+	 * @return  string  The dummy customer user ID in logged-in mode, or a guest ID.
+	 */
+	public function get_preview_customer_id() {
+		// Return the dummy customer ID in logged-in mode
+		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
+			return (string) self::DUMMY_CUSTOMER_ID;
+		}
+
+		// Derive the guest ID from the token, so it stays the same across requests and nonces keep working
+		return 't_' . substr( md5( $this->get_request_token() ), 0, 30 );
+	}
+
+	/**
+	 * Get the WooCommerce session handler class for preview requests.
+	 *
+	 * @param   string  $class_name  Session handler class name.
+	 */
+	public function get_session_handler_class( $class_name ) {
+		return 'FluidCheckout_Admin_Preview_Session_Handler';
+	}
+
+
+
+	/**
+	 * Get the user data of the dummy logged-in customer, in the same shape as a row of the users table.
+	 *
+	 * @return  object
+	 */
+	public function get_dummy_customer_user_data() {
+		return (object) array(
+			'ID'                     => self::DUMMY_CUSTOMER_ID,
+			'user_login'             => 'fc-preview-customer',
+			'user_pass'              => '',
+			'user_nicename'          => 'fc-preview-customer',
+			'user_email'             => 'customer@example.com',
+			'user_url'               => '',
+			'user_registered'        => current_time( 'mysql', true ),
+			'user_activation_key'    => '',
+			'user_status'            => '0',
+			'display_name'           => __( 'Preview customer', 'fluid-checkout' ),
+		);
+	}
+
+	/**
+	 * Get the meta values of the dummy logged-in customer.
+	 *
+	 * @return  array  Meta values by meta key.
+	 */
+	public function get_dummy_customer_meta() {
+		global $wpdb;
+
+		return array(
+			$wpdb->get_blog_prefix() . 'capabilities' => array( 'customer' => true ),
+		);
+	}
+
+	/**
+	 * Get the meta values of the dummy logged-in customer without reading the database.
+	 *
+	 * @param   mixed   $value     Meta value, `null` to read it from the database.
+	 * @param   int     $user_id   User ID.
+	 * @param   string  $meta_key  Meta key, or an empty string for all meta values.
+	 * @param   bool    $single    Whether a single value is requested.
+	 */
+	public function maybe_get_dummy_customer_meta( $value, $user_id, $meta_key, $single ) {
+		// Bail if not the dummy customer
+		if ( self::DUMMY_CUSTOMER_ID !== (int) $user_id ) { return $value; }
+
+		// Get dummy customer meta
+		$dummy_meta = $this->get_dummy_customer_meta();
+
+		// Maybe return all meta values, each wrapped in an array like the database results
+		if ( '' === $meta_key ) {
+			return array_map( function( $meta_value ) { return array( $meta_value ); }, $dummy_meta );
+		}
+
+		// Maybe return the meta value, wrapped in an array as WordPress unwraps single values
+		if ( array_key_exists( $meta_key, $dummy_meta ) ) {
+			return array( $dummy_meta[ $meta_key ] );
+		}
+
+		// Return an empty value, as the dummy customer has no other meta
+		return $single ? '' : array();
+	}
+
+	/**
+	 * Skip writing meta values of the dummy logged-in customer to the database.
+	 *
+	 * @param   null|bool  $check    Whether to skip writing, `null` to write the meta value.
+	 * @param   int        $user_id  User ID.
+	 */
+	public function maybe_skip_dummy_customer_meta_write( $check, $user_id ) {
+		// Bail if not the dummy customer
+		if ( self::DUMMY_CUSTOMER_ID !== (int) $user_id ) { return $check; }
+
+		return true;
 	}
 
 }
