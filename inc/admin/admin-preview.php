@@ -124,6 +124,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Response headers
 		remove_action( 'template_redirect', 'wc_send_frame_options_header', 10 ); // Replaced by the `frame-ancestors` policy, which also allows the admin origin
 		add_filter( 'wp_headers', array( $this, 'add_preview_headers' ), 100 ); // Late to override values set by other plugins
+		add_filter( 'wp_robots', 'wp_robots_no_robots', 10 );
 
 		// Admin bar
 		add_filter( 'show_admin_bar', '__return_false', 10 );
@@ -222,9 +223,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 * @return  bool
 	 */
 	public function is_preview_request() {
-		// Maybe validate the request token, only once per request
+		// Maybe validate the request token, only once per request, ignoring admin page loads but not AJAX requests sent from preview pages
 		if ( null === $this->is_preview_request ) {
-			$this->is_preview_request = 0 < $this->get_token_user_id( $this->get_request_token() );
+			$this->is_preview_request = ( ! is_admin() || wp_doing_ajax() ) && 0 < $this->get_token_user_id( $this->get_request_token() );
 		}
 
 		return $this->is_preview_request;
@@ -280,7 +281,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		$headers = array_merge( $headers, wp_get_nocache_headers() );
 
 		// Keep preview pages out of search engines, and the token out of referrers sent to other domains
-		$headers[ 'X-Robots-Tag' ] = 'noindex, nofollow';
+		$headers[ 'X-Robots-Tag' ] = 'noindex, nofollow, noarchive';
 		$headers[ 'Referrer-Policy' ] = 'same-origin';
 
 		// Get directives of an existing content security policy, except frame ancestors which preview pages set
