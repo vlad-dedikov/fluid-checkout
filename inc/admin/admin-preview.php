@@ -122,24 +122,17 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 
 	/**
-	 * Create a preview token for a user.
+	 * Create a preview token for the current user.
 	 * Self-contained so it also works when the frontend is on a different domain from the admin.
 	 *
-	 * @param   int  $user_id  User ID. Defaults to the current user.
-	 *
-	 * @return  string  The preview token, or an empty string when the user cannot use the preview.
+	 * @return  string  The preview token, or an empty string when the current user cannot use the preview.
 	 */
-	public function create_token( $user_id = null ) {
-		// Maybe use the current user
-		if ( null === $user_id ) {
-			$user_id = get_current_user_id();
-		}
+	public function create_token() {
+		// Bail if the current user cannot use the preview
+		if ( ! current_user_can( self::CAPABILITY ) ) { return ''; }
 
-		// Get user
-		$user = get_userdata( $user_id );
-
-		// Bail if user cannot use the preview
-		if ( ! $user || ! user_can( $user, self::CAPABILITY ) ) { return ''; }
+		// Get current user
+		$user = wp_get_current_user();
 
 		// Define token payload
 		$payload = $user->ID . '.' . ( time() + self::TOKEN_LIFETIME );
@@ -270,8 +263,16 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		$headers[ 'X-Robots-Tag' ] = 'noindex, nofollow';
 		$headers[ 'Referrer-Policy' ] = 'same-origin';
 
-		// Only allow the frontend and the admin to load preview pages in a frame
-		$headers[ 'Content-Security-Policy' ] = "frame-ancestors 'self' " . $this->get_admin_origin();
+		// Get directives of an existing content security policy, except frame ancestors which preview pages set
+		$policy = array_key_exists( 'Content-Security-Policy', $headers ) ? $headers[ 'Content-Security-Policy' ] : '';
+		$policy_directives = array_filter( array_map( 'trim', explode( ';', $policy ) ), function( $directive ) {
+			return '' !== $directive && 0 !== stripos( $directive, 'frame-ancestors' );
+		} );
+
+		// Only allow the frontend and the admin to load preview pages in a frame, replacing frame options set by other plugins
+		$policy_directives[] = "frame-ancestors 'self' " . $this->get_admin_origin();
+		$headers[ 'Content-Security-Policy' ] = implode( '; ', $policy_directives );
+		unset( $headers[ 'X-Frame-Options' ] );
 
 		return $headers;
 	}
