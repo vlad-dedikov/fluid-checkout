@@ -37,9 +37,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	const MODE_LOGGED_IN = 'logged_in';
 
 	/**
-	 * User ID of the dummy logged-in customer, high enough to never belong to a real user.
+	 * Maximum number of line items in the preview cart.
 	 */
-	const DUMMY_CUSTOMER_ID = 2147483647;
+	const CART_ITEMS_LIMIT = 3;
 
 	/**
 	 * Whether the current request is a preview request, cached after first check.
@@ -68,6 +68,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Preview session
 		$this->preview_session_hooks();
+
+		// Preview cart
+		$this->preview_cart_hooks();
 	}
 
 	/**
@@ -79,6 +82,8 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Preview customer
 		add_action( 'init', array( $this, 'switch_to_preview_customer' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
+		add_action( 'wp_loaded', array( $this, 'maybe_set_guest_customer_fields' ), 5 ); // Before WooCommerce loads the cart and calculates shipping at priority `10`
+		add_filter( 'woocommerce_checkout_get_value', array( $this, 'maybe_get_dummy_checkout_field_value' ), PHP_INT_MAX, 2 ); // Last, to only fill fields that other filters leave empty, such as with session values
 
 		// Session
 		add_filter( 'woocommerce_session_handler', array( $this, 'get_session_handler_class' ), 100 ); // Late to override session handlers from other plugins
@@ -92,6 +97,21 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		add_filter( 'add_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
 		add_filter( 'update_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
 		add_filter( 'delete_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+	}
+
+	/**
+	 * Add or remove preview cart hooks.
+	 */
+	public function preview_cart_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Dummy products
+		add_filter( 'woocommerce_product_type_query', array( $this, 'maybe_set_dummy_product_type' ), PHP_INT_MAX, 2 ); // Last, to override types set by other plugins
+		add_filter( 'woocommerce_product_class', array( $this, 'maybe_set_dummy_product_class' ), PHP_INT_MAX, 4 ); // Last, to override classes set by other plugins, some of which also use `PHP_INT_MAX`
+
+		// Cart items
+		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_cart_items' ), 10 );
 	}
 
 	/**
@@ -307,9 +327,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
 			// Cache the dummy user in memory only, so WordPress and WooCommerce load it like a real user
 			wp_cache_add_non_persistent_groups( array( 'users' ) );
-			wp_cache_set( self::DUMMY_CUSTOMER_ID, $this->get_dummy_customer_user_data(), 'users' );
+			wp_cache_set( FluidCheckout_Admin_Preview_Dummy_Data::CUSTOMER_ID, FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_user_data(), 'users' );
 
-			wp_set_current_user( self::DUMMY_CUSTOMER_ID );
+			wp_set_current_user( FluidCheckout_Admin_Preview_Dummy_Data::CUSTOMER_ID );
 		}
 		// Otherwise, use a guest
 		else {
@@ -325,7 +345,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	public function get_preview_customer_id() {
 		// Return the dummy customer ID in logged-in mode
 		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
-			return (string) self::DUMMY_CUSTOMER_ID;
+			return (string) FluidCheckout_Admin_Preview_Dummy_Data::CUSTOMER_ID;
 		}
 
 		// Derive the guest ID from the token, so it stays the same across requests and nonces keep working
@@ -344,39 +364,6 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 
 	/**
-	 * Get the user data of the dummy logged-in customer, in the same shape as a row of the users table.
-	 *
-	 * @return  object
-	 */
-	public function get_dummy_customer_user_data() {
-		return (object) array(
-			'ID'                     => self::DUMMY_CUSTOMER_ID,
-			'user_login'             => 'fc-preview-customer',
-			'user_pass'              => '',
-			'user_nicename'          => 'fc-preview-customer',
-			'user_email'             => 'customer@example.com',
-			'user_url'               => '',
-			'user_registered'        => current_time( 'mysql', true ),
-			'user_activation_key'    => '',
-			'user_status'            => '0',
-			'display_name'           => __( 'Preview customer', 'fluid-checkout' ),
-		);
-	}
-
-	/**
-	 * Get the meta values of the dummy logged-in customer.
-	 *
-	 * @return  array  Meta values by meta key.
-	 */
-	public function get_dummy_customer_meta() {
-		global $wpdb;
-
-		return array(
-			$wpdb->get_blog_prefix() . 'capabilities' => array( 'customer' => true ),
-		);
-	}
-
-	/**
 	 * Get the meta values of the dummy logged-in customer without reading the database.
 	 *
 	 * @param   mixed   $value     Meta value, `null` to read it from the database.
@@ -386,10 +373,10 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 */
 	public function maybe_get_dummy_customer_meta( $value, $user_id, $meta_key, $single ) {
 		// Bail if not the dummy customer
-		if ( self::DUMMY_CUSTOMER_ID !== (int) $user_id ) { return $value; }
+		if ( FluidCheckout_Admin_Preview_Dummy_Data::CUSTOMER_ID !== (int) $user_id ) { return $value; }
 
 		// Get dummy customer meta
-		$dummy_meta = $this->get_dummy_customer_meta();
+		$dummy_meta = FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_meta();
 
 		// Maybe return all meta values, each wrapped in an array like the database results
 		if ( '' === $meta_key ) {
@@ -413,9 +400,201 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 */
 	public function maybe_skip_dummy_customer_meta_write( $check, $user_id ) {
 		// Bail if not the dummy customer
-		if ( self::DUMMY_CUSTOMER_ID !== (int) $user_id ) { return $check; }
+		if ( FluidCheckout_Admin_Preview_Dummy_Data::CUSTOMER_ID !== (int) $user_id ) { return $check; }
 
 		return true;
+	}
+
+	/**
+	 * Set the dummy customer fields on the guest customer, as guests have no saved address to fill the checkout fields.
+	 */
+	public function maybe_set_guest_customer_fields() {
+		// Bail if logged in, as the dummy customer fields come from its saved account meta
+		if ( is_user_logged_in() ) { return; }
+
+		// Bail if customer is not available
+		if ( ! WC()->customer instanceof WC_Customer ) { return; }
+
+		// Set the fields the customer has properties for, skipping invalid values set through filters
+		WC()->customer->set_props( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_fields() );
+	}
+
+	/**
+	 * Get the dummy values of checkout fields the customer has no property for, such as fields added by other plugins.
+	 *
+	 * @param   mixed   $value  Field value, `null` to get it from the customer.
+	 * @param   string  $input  Field key.
+	 */
+	public function maybe_get_dummy_checkout_field_value( $value, $input ) {
+		// Bail if the value is already set
+		if ( null !== $value ) { return $value; }
+
+		// Bail if the customer has a property for the field, already filled with the dummy value
+		if ( method_exists( 'WC_Customer', 'get_' . $input ) ) { return $value; }
+
+		// Get dummy customer fields
+		$dummy_fields = FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_fields();
+
+		// Bail if not a dummy customer field
+		if ( ! array_key_exists( $input, $dummy_fields ) ) { return $value; }
+
+		return $dummy_fields[ $input ];
+	}
+
+
+
+	/**
+	 * Set the product type of dummy products, which have no database record to read it from.
+	 *
+	 * @param   string|false  $product_type  Product type, or `false` to read it from the database.
+	 * @param   int           $product_id    Product ID.
+	 */
+	public function maybe_set_dummy_product_type( $product_type, $product_id ) {
+		// Bail if not a dummy product
+		if ( ! FluidCheckout_Admin_Preview_Dummy_Data::instance()->is_dummy_product_id( $product_id ) ) { return $product_type; }
+
+		return 'simple';
+	}
+
+	/**
+	 * Set the product class of dummy products, which loads them from memory instead of the database.
+	 *
+	 * @param   string  $class_name    Product class name.
+	 * @param   string  $product_type  Product type.
+	 * @param   string  $post_type     Post type of the product.
+	 * @param   int     $product_id    Product ID.
+	 */
+	public function maybe_set_dummy_product_class( $class_name, $product_type, $post_type, $product_id ) {
+		// Bail if not a dummy product
+		if ( ! FluidCheckout_Admin_Preview_Dummy_Data::instance()->is_dummy_product_id( $product_id ) ) { return $class_name; }
+
+		return 'FluidCheckout_Admin_Preview_Dummy_Product';
+	}
+
+
+
+	/**
+	 * Get the products for the preview cart: recent catalog products, those that need shipping first, topped up with dummy products.
+	 *
+	 * @return  WC_Product[]
+	 */
+	public function get_preview_cart_products() {
+		// Define product lists
+		$shippable_products = array();
+		$other_products = array();
+
+		// Define query arguments for recent catalog products, more than needed as some may not be purchasable
+		$query_args = array( 'status' => 'publish', 'type' => array( 'simple', 'variable' ), 'stock_status' => 'instock', 'limit' => 10, 'orderby' => 'date', 'order' => 'DESC', 'return' => 'ids' );
+
+		// Get recent catalog product IDs, products that are not virtual first so recent virtual products cannot hide the shipping step
+		$catalog_product_ids = array_unique( array_merge( wc_get_products( array_merge( $query_args, array( 'virtual' => false ) ) ), wc_get_products( $query_args ) ) );
+
+		// Iterate catalog product IDs
+		foreach ( $catalog_product_ids as $catalog_product_id ) {
+			// Stop when enough products that need shipping are found
+			if ( count( $shippable_products ) >= self::CART_ITEMS_LIMIT ) { break; }
+
+			// Get product
+			$product = wc_get_product( $catalog_product_id );
+
+			// Maybe use the first purchasable variation of variable products
+			if ( $product && $product->is_type( 'variable' ) ) {
+				$product = $this->get_preview_variation( $product );
+			}
+
+			// Skip products that cannot be bought
+			if ( ! $product || ! $product->is_purchasable() || ! $product->is_in_stock() ) { continue; }
+
+			// Maybe add product to the list shown first, so the preview includes the shipping step
+			if ( $product->needs_shipping() ) {
+				$shippable_products[] = $product;
+			}
+			// Otherwise, add product to the list of other products
+			else {
+				$other_products[] = $product;
+			}
+		}
+
+		// Get catalog products up to the cart items limit
+		$products = array_slice( array_merge( $shippable_products, $other_products ), 0, self::CART_ITEMS_LIMIT );
+
+		// Iterate dummy product IDs, to top up the cart
+		foreach ( array_keys( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_products() ) as $dummy_product_id ) {
+			// Stop when the cart items limit is reached
+			if ( count( $products ) >= self::CART_ITEMS_LIMIT ) { break; }
+
+			// Get dummy product
+			$product = wc_get_product( $dummy_product_id );
+
+			// Maybe add the dummy product, which only loads on preview requests
+			if ( $product ) {
+				$products[] = $product;
+			}
+		}
+
+		return $products;
+	}
+
+	/**
+	 * Get the first variation of a variable product that can be bought and has all its attributes set.
+	 *
+	 * @param   WC_Product_Variable  $product  Variable product.
+	 *
+	 * @return  WC_Product_Variation|false  The variation, or `false` when none can be bought.
+	 */
+	public function get_preview_variation( $product ) {
+		// Iterate variations
+		foreach ( $product->get_children() as $variation_id ) {
+			// Get variation
+			$variation = wc_get_product( $variation_id );
+
+			// Skip variations that cannot be bought, or with attributes open to any value
+			if ( ! $variation || ! $variation->is_purchasable() || ! $variation->is_in_stock() || in_array( '', $variation->get_variation_attributes(), true ) ) { continue; }
+
+			return $variation;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Set the preview cart items in the session, before WooCommerce loads the cart from it.
+	 * Uses the session instead of `add_to_cart()`, so add-to-cart events are not sent to analytics and marketing plugins.
+	 */
+	public function maybe_set_preview_cart_items() {
+		// Bail if the session already has a cart
+		if ( null !== WC()->session->get( 'cart', null ) ) { return; }
+
+		// Define cart items
+		$cart_items = array();
+
+		// Iterate preview cart products
+		foreach ( $this->get_preview_cart_products() as $product ) {
+			// Maybe use the parent product ID and the attributes of variations
+			if ( $product->is_type( 'variation' ) ) {
+				$product_id = $product->get_parent_id();
+				$variation_id = $product->get_id();
+				$variation = $product->get_variation_attributes();
+			}
+			// Otherwise, use the product ID without variation
+			else {
+				$product_id = $product->get_id();
+				$variation_id = 0;
+				$variation = array();
+			}
+
+			// Add cart item, in the same shape WooCommerce saves to the session
+			$cart_item_key = WC()->cart->generate_cart_id( $product_id, $variation_id, $variation );
+			$cart_items[ $cart_item_key ] = array(
+				'key'               => $cart_item_key,
+				'product_id'        => $product_id,
+				'variation_id'      => $variation_id,
+				'variation'         => $variation,
+				'quantity'          => 1,
+			);
+		}
+
+		WC()->session->set( 'cart', $cart_items );
 	}
 
 }
