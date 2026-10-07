@@ -102,7 +102,7 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 	 *
 	 * @return  string
 	 */
-	public function get_company_name() {
+	public function get_customer_company() {
 		return _x( 'Example Company', 'Dummy customer company in the admin preview', 'fluid-checkout' );
 	}
 
@@ -126,7 +126,7 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 		}
 
 		// Get company name, only when the company field is required, as the dummy customer is otherwise a private customer
-		$company = 'required' === FluidCheckout_Settings::instance()->get_option( 'woocommerce_checkout_company_field' ) ? $this->get_company_name() : '';
+		$company = 'required' === FluidCheckout_Settings::instance()->get_option( 'woocommerce_checkout_company_field' ) ? $this->get_customer_company() : '';
 
 		// Define dummy address with the store address
 		$address = array_merge( $this->get_customer_name(), array(

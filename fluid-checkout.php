@@ -597,8 +597,8 @@ class FluidCheckout {
 		// Load admin preview, also required on the frontend to handle preview requests
 		require_once self::$directory_path . 'inc/admin/admin-preview.php';
 		require_once self::$directory_path . 'inc/admin/admin-preview-dummy-data.php';
-		require_once self::$directory_path . 'inc/admin/admin-preview-session-handler.php';
 		require_once self::$directory_path . 'inc/admin/admin-preview-dummy-product.php';
+		require_once self::$directory_path . 'inc/admin/admin-preview-session-handler.php';
 
 		// Load each features
 		foreach ( self::$features as $feature_key => $feature ) {

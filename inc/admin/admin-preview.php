@@ -66,82 +66,14 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Preview requests
 		add_action( 'init', array( $this, 'preview_request_hooks' ), 100 ); // Late so the hooks removed from other plugins are already registered
 
-		// Preview session
-		$this->preview_session_hooks();
-
 		// Preview guards
 		$this->preview_guard_hooks();
 
+		// Preview session
+		$this->preview_session_hooks();
+
 		// Preview cart
 		$this->preview_cart_hooks();
-	}
-
-	/**
-	 * Add or remove preview session hooks.
-	 */
-	public function preview_session_hooks() {
-		// Bail if not a preview request
-		if ( ! $this->is_preview_request() ) { return; }
-
-		// Preview customer
-		add_action( 'init', array( $this, 'switch_to_preview_customer' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
-		add_action( 'wp_loaded', array( $this, 'maybe_set_guest_customer_fields' ), 5 ); // Before WooCommerce loads the cart and calculates shipping at priority `10`
-		add_filter( 'woocommerce_checkout_get_value', array( $this, 'maybe_get_dummy_checkout_field_value' ), PHP_INT_MAX, 2 ); // Last, to only fill fields that other filters leave empty, such as with session values
-
-		// Session
-		add_filter( 'woocommerce_session_handler', array( $this, 'get_session_handler_class' ), 100 ); // Late to override session handlers from other plugins
-		add_filter( 'woocommerce_persistent_cart_enabled', '__return_false', 10 );
-
-		// Cookies
-		add_filter( 'woocommerce_set_cookie_enabled', '__return_false', 10 ); // Required to keep the visitor's own session cookies unchanged when the preview is on the same domain
-
-		// Dummy customer meta
-		add_filter( 'get_user_metadata', array( $this, 'maybe_get_dummy_customer_meta' ), 10, 4 );
-		add_filter( 'add_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
-		add_filter( 'update_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
-		add_filter( 'delete_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
-	}
-
-	/**
-	 * Add or remove hooks that stop preview requests from placing orders, logging in, adding to cart and sending emails.
-	 * Registered when the class loads, so they also apply to requests handled before `init` finishes.
-	 */
-	public function preview_guard_hooks() {
-		// Bail if not a preview request
-		if ( ! $this->is_preview_request() ) { return; }
-
-		// Orders and payments
-		add_action( 'woocommerce_before_checkout_process', array( $this, 'prevent_checkout_processing' ), 10 );
-		add_action( 'woocommerce_before_order_object_save', array( $this, 'maybe_prevent_new_order_save' ), 10 ); // Last resort for orders saved outside checkout processing, such as by express payment endpoints
-		add_filter( 'rest_pre_dispatch', array( $this, 'maybe_prevent_store_api_checkout' ), 10, 3 );
-
-		// Logins and accounts
-		add_filter( 'woocommerce_process_login_errors', array( $this, 'add_login_error' ), 10 ); // Stops login forms before authentication, so attempts do not count as failed logins
-		add_filter( 'authenticate', array( $this, 'prevent_login' ), PHP_INT_MAX ); // Last resort for other login forms, last to override users authenticated by other filters
-		add_filter( 'woocommerce_registration_errors', array( $this, 'add_registration_error' ), 10 );
-		add_filter( 'send_auth_cookies', '__return_false', 10 ); // Required to keep the visitor's own login cookies, as preview pages share the domain
-
-		// Add to cart
-		add_filter( 'woocommerce_add_to_cart_validation', '__return_false', PHP_INT_MAX ); // Last, to refuse add-to-cart forms and AJAX, so add-to-cart events do not reach analytics and marketing plugins
-		add_filter( 'woocommerce_cart_redirect_after_error', array( $this, 'get_add_to_cart_error_redirect_url' ), 10 ); // Required to keep the frame in the preview, as scripts open this URL when adding to cart fails
-
-		// Emails
-		add_filter( 'pre_wp_mail', '__return_false', 10 ); // Required as preview requests must not send emails
-	}
-
-	/**
-	 * Add or remove preview cart hooks.
-	 */
-	public function preview_cart_hooks() {
-		// Bail if not a preview request
-		if ( ! $this->is_preview_request() ) { return; }
-
-		// Dummy products
-		add_filter( 'woocommerce_product_type_query', array( $this, 'maybe_set_dummy_product_type' ), PHP_INT_MAX, 2 ); // Last, to override types set by other plugins
-		add_filter( 'woocommerce_product_class', array( $this, 'maybe_set_dummy_product_class' ), PHP_INT_MAX, 4 ); // Last, to override classes set by other plugins, some of which also use `PHP_INT_MAX`
-
-		// Cart items
-		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_cart_items' ), 10 );
 	}
 
 	/**
@@ -172,6 +104,15 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		add_filter( 'woocommerce_get_cart_url', array( $this, 'add_preview_args_to_url' ), 10 );
 		add_filter( 'wp_redirect', array( $this, 'maybe_add_preview_args_to_redirect' ), 10 );
 
+		// Body classes
+		add_filter( 'body_class', array( $this, 'add_body_class' ), 10 );
+
+		// Register assets
+		add_action( 'wp_enqueue_scripts', array( $this, 'register_assets' ), 5 );
+
+		// Enqueue assets
+		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ), 10 );
+
 		// Orders and payments
 		remove_action( 'wp', array( 'WC_Form_Handler', 'pay_action' ), 20 );
 		remove_action( 'wp_loaded', array( 'WC_Form_Handler', 'cancel_order' ), 20 );
@@ -186,6 +127,77 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'resend_set_password' ), 10 );
 		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'save_address' ), 10 );
 		remove_action( 'template_redirect', array( 'WC_Form_Handler', 'save_account_details' ), 10 );
+	}
+
+	/**
+	 * Add or remove hooks that stop preview requests from placing orders, logging in, adding to cart and sending emails.
+	 * Registered when the class loads, so they also apply to requests handled before `init` finishes.
+	 */
+	public function preview_guard_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Orders and payments
+		add_action( 'woocommerce_before_checkout_process', array( $this, 'prevent_checkout_processing' ), 10 );
+		add_action( 'woocommerce_before_order_object_save', array( $this, 'maybe_prevent_new_order_save' ), 10 ); // Last resort for orders saved outside checkout processing, such as by express payment endpoints
+		add_filter( 'rest_pre_dispatch', array( $this, 'maybe_prevent_store_api_checkout' ), 10, 3 );
+
+		// Logins and accounts
+		add_filter( 'woocommerce_process_login_errors', array( $this, 'add_login_error' ), 10 ); // Stops login forms before authentication, so attempts do not count as failed logins
+		add_filter( 'authenticate', array( $this, 'prevent_login' ), PHP_INT_MAX ); // Last resort for other login forms, last to override users authenticated by other filters
+		add_filter( 'woocommerce_registration_errors', array( $this, 'add_registration_error' ), 10 );
+		add_filter( 'send_auth_cookies', '__return_false', 10 ); // Required to keep the visitor's own login cookies, as preview pages share the domain
+
+		// Add to cart
+		add_filter( 'woocommerce_add_to_cart_validation', '__return_false', PHP_INT_MAX ); // Last, to refuse add-to-cart forms and AJAX, so add-to-cart events do not reach analytics and marketing plugins
+		add_filter( 'woocommerce_cart_redirect_after_error', array( $this, 'get_add_to_cart_error_redirect_url' ), 10 ); // Required to keep the frame in the preview, as scripts open this URL when adding to cart fails
+
+		// Emails
+		add_filter( 'pre_wp_mail', '__return_false', 10 ); // Required as preview requests must not send emails
+	}
+
+	/**
+	 * Add or remove preview session hooks.
+	 */
+	public function preview_session_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Preview customer
+		add_action( 'init', array( $this, 'switch_to_preview_customer' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
+
+		// Session
+		add_filter( 'woocommerce_session_handler', array( $this, 'get_session_handler_class' ), 100 ); // Late to override session handlers from other plugins
+		add_filter( 'woocommerce_persistent_cart_enabled', '__return_false', 10 );
+
+		// Cookies
+		add_filter( 'woocommerce_set_cookie_enabled', '__return_false', 10 ); // Required to keep the visitor's own session cookies unchanged when the preview is on the same domain
+
+		// Dummy customer meta
+		add_filter( 'get_user_metadata', array( $this, 'maybe_get_dummy_customer_meta' ), 10, 4 );
+		add_filter( 'add_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+		add_filter( 'update_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+		add_filter( 'delete_user_metadata', array( $this, 'maybe_skip_dummy_customer_meta_write' ), 10, 2 );
+
+		// Dummy customer fields
+		add_action( 'wp_loaded', array( $this, 'maybe_set_dummy_guest_customer_fields' ), 5 ); // Before WooCommerce loads the cart and calculates shipping at priority `10`
+		add_action( 'wp_loaded', array( $this, 'set_dummy_new_address_session_values' ), 5 );
+		add_filter( 'woocommerce_checkout_get_value', array( $this, 'maybe_get_dummy_checkout_field_value' ), PHP_INT_MAX, 2 ); // Last, to only fill fields that other filters leave empty, such as with session values
+	}
+
+	/**
+	 * Add or remove preview cart hooks.
+	 */
+	public function preview_cart_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Dummy products
+		add_filter( 'woocommerce_product_type_query', array( $this, 'maybe_get_dummy_product_type' ), PHP_INT_MAX, 2 ); // Last, to override types set by other plugins
+		add_filter( 'woocommerce_product_class', array( $this, 'maybe_get_dummy_product_class' ), PHP_INT_MAX, 4 ); // Last, to override classes set by other plugins, some of which also use `PHP_INT_MAX`
+
+		// Cart items
+		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_cart_items' ), 10 );
 	}
 
 
@@ -291,6 +303,23 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		return self::MODE_LOGGED_IN === $mode ? self::MODE_LOGGED_IN : self::MODE_GUEST;
 	}
 
+	/**
+	 * Get the query arguments that make requests preview requests: the preview token, and the mode when logged in.
+	 *
+	 * @return  array  Query argument values by argument name.
+	 */
+	public function get_preview_args() {
+		// Define preview token argument
+		$preview_args = array( self::TOKEN_QUERY_ARG => $this->get_request_token() );
+
+		// Maybe add the logged-in mode
+		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
+			$preview_args[ self::MODE_QUERY_ARG ] = self::MODE_LOGGED_IN;
+		}
+
+		return $preview_args;
+	}
+
 
 
 	/**
@@ -364,15 +393,10 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Get query string separator
 		$separator = false === strpos( $url_parts[ 0 ], '?' ) ? '?' : '&';
 
-		// Define the token argument directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
-		$preview_args = $separator . self::TOKEN_QUERY_ARG . '=' . rawurlencode( $this->get_request_token() );
+		// Append the arguments directly, as `add_query_arg()` would encode the `%%endpoint%%` placeholder replaced by scripts
+		$preview_query = $separator . http_build_query( $this->get_preview_args(), '', '&', PHP_QUERY_RFC3986 );
 
-		// Maybe add the logged-in mode
-		if ( self::MODE_LOGGED_IN === $this->get_preview_mode() ) {
-			$preview_args .= '&' . self::MODE_QUERY_ARG . '=' . self::MODE_LOGGED_IN;
-		}
-
-		return $url_parts[ 0 ] . $preview_args . ( isset( $url_parts[ 1 ] ) ? '#' . $url_parts[ 1 ] : '' );
+		return $url_parts[ 0 ] . $preview_query . ( isset( $url_parts[ 1 ] ) ? '#' . $url_parts[ 1 ] : '' );
 	}
 
 	/**
@@ -385,6 +409,61 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		if ( 0 !== strpos( $location, home_url( '/' ) ) || 0 === strpos( $location, admin_url() ) || 0 === strpos( $location, wp_login_url() ) ) { return $location; }
 
 		return $this->add_preview_args_to_url( $location );
+	}
+
+
+
+	/**
+	 * Add the preview body classes, with the header and footer hidden until the admin page shows them.
+	 *
+	 * @param   array  $classes  Body classes.
+	 */
+	public function add_body_class( $classes ) {
+		return array_merge( $classes, array( 'fc-admin-preview', 'fc-admin-preview--hide-header-footer' ) );
+	}
+
+	/**
+	 * Register the frame script and styles.
+	 */
+	public function register_assets() {
+		// Scripts, initialized right away instead of on `load`, so the frame guards apply before other scripts handle clicks or send requests
+		// Settings are passed directly, as the plugin settings object is not output on every page the preview shows
+		wp_register_script( 'fc-admin-preview-frame', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin-preview-frame' ), array( 'jquery', 'fc-utils' ), NULL, array( 'in_footer' => true, 'strategy' => 'defer' ) );
+		wp_add_inline_script( 'fc-admin-preview-frame', 'FCAdminPreviewFrame.init(' . wp_json_encode( $this->get_frame_script_settings() ) . ');' );
+
+		// Add the preview token and mode to REST requests sent through `wp.apiFetch`, such as Store API requests from blocks
+		// Uses a middleware, as filtering the REST URL would break how `wp.apiFetch` appends request paths to it
+		wp_add_inline_script( 'wp-api-fetch', 'wp.apiFetch.use(function(options,next){return next(options.path?Object.assign({},options,{path:wp.url.addQueryArgs(options.path,' . wp_json_encode( $this->get_preview_args() ) . ')}):options);});' );
+
+		// Styles
+		wp_register_style( 'fc-admin-preview-frame', FluidCheckout_Enqueue::instance()->get_style_url( 'css/admin-preview-frame' ), array(), NULL );
+	}
+
+	/**
+	 * Enqueue the frame script and styles.
+	 */
+	public function enqueue_assets() {
+		// Scripts
+		wp_enqueue_script( 'fc-admin-preview-frame' );
+
+		// Styles
+		wp_enqueue_style( 'fc-admin-preview-frame' );
+	}
+
+	/**
+	 * Get the frame script settings.
+	 *
+	 * @return  array
+	 */
+	public function get_frame_script_settings() {
+		/**
+		 * Filter the settings of the admin preview frame script, for example to make more payment buttons inert.
+		 */
+		return apply_filters( 'fc_admin_preview_frame_script_settings', array(
+			'adminOrigin'         => $this->get_admin_origin(),
+			'tokenQueryArg'       => self::TOKEN_QUERY_ARG,
+			'previewArgs'         => $this->get_preview_args(),
+		) );
 	}
 
 
@@ -578,7 +657,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	/**
 	 * Set the dummy customer fields on the guest customer, as guests have no saved address to fill the checkout fields.
 	 */
-	public function maybe_set_guest_customer_fields() {
+	public function maybe_set_dummy_guest_customer_fields() {
 		// Bail if logged in, as the dummy customer fields come from its saved account meta
 		if ( is_user_logged_in() ) { return; }
 
@@ -587,6 +666,19 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Set the fields the customer has properties for, skipping invalid values set through filters
 		WC()->customer->set_props( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_fields() );
+	}
+
+	/**
+	 * Set the dummy addresses as the new addresses Fluid Checkout restores when a "same as" address checkbox is unchecked, as read-only fields cannot be filled.
+	 */
+	public function set_dummy_new_address_session_values() {
+		// Bail if session is not available
+		if ( ! WC()->session instanceof WC_Session ) { return; }
+
+		// Iterate dummy customer fields
+		foreach ( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_fields() as $field_key => $value ) {
+			FluidCheckout_Steps::instance()->set_checkout_field_value_to_session( 'save_' . $field_key, $value );
+		}
 	}
 
 	/**
@@ -614,12 +706,12 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 
 	/**
-	 * Set the product type of dummy products, which have no database record to read it from.
+	 * Get the product type of dummy products, which have no database record to read it from.
 	 *
 	 * @param   string|false  $product_type  Product type, or `false` to read it from the database.
 	 * @param   int           $product_id    Product ID.
 	 */
-	public function maybe_set_dummy_product_type( $product_type, $product_id ) {
+	public function maybe_get_dummy_product_type( $product_type, $product_id ) {
 		// Bail if not a dummy product
 		if ( ! FluidCheckout_Admin_Preview_Dummy_Data::instance()->is_dummy_product_id( $product_id ) ) { return $product_type; }
 
@@ -627,14 +719,14 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	}
 
 	/**
-	 * Set the product class of dummy products, which loads them from memory instead of the database.
+	 * Get the product class of dummy products, which loads them from memory instead of the database.
 	 *
 	 * @param   string  $class_name    Product class name.
 	 * @param   string  $product_type  Product type.
 	 * @param   string  $post_type     Post type of the product.
 	 * @param   int     $product_id    Product ID.
 	 */
-	public function maybe_set_dummy_product_class( $class_name, $product_type, $post_type, $product_id ) {
+	public function maybe_get_dummy_product_class( $class_name, $product_type, $post_type, $product_id ) {
 		// Bail if not a dummy product
 		if ( ! FluidCheckout_Admin_Preview_Dummy_Data::instance()->is_dummy_product_id( $product_id ) ) { return $class_name; }
 
