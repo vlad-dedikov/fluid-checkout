@@ -66,6 +66,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Preview requests
 		add_action( 'init', array( $this, 'preview_request_hooks' ), 100 ); // Late so the hooks removed from other plugins are already registered
 
+		// Expired previews
+		add_action( 'init', array( $this, 'maybe_reject_expired_preview_request' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
+
 		// Preview guards
 		$this->preview_guard_hooks();
 
@@ -219,6 +222,23 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		$payload = $user->ID . '.' . ( time() + self::TOKEN_LIFETIME );
 
 		return $payload . '.' . $this->get_token_signature( $payload, $user );
+	}
+
+	/**
+	 * Get the preview URL of a frontend page for the current user, which opens the page as a preview request.
+	 *
+	 * @param   string  $url  Frontend page URL.
+	 *
+	 * @return  string  The preview URL, or an empty string when the current user cannot use the preview.
+	 */
+	public function get_preview_url( $url ) {
+		// Get preview token for the current user
+		$token = $this->create_token();
+
+		// Bail if the current user cannot use the preview
+		if ( '' === $token ) { return ''; }
+
+		return add_query_arg( self::TOKEN_QUERY_ARG, $token, $url );
 	}
 
 	/**
@@ -467,6 +487,23 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	}
 
 
+
+	/**
+	 * Reject requests with a preview token that is no longer valid, such as from a preview left open after its token expired.
+	 * Without this, the open preview would continue with the visitor's own session and account.
+	 */
+	public function maybe_reject_expired_preview_request() {
+		// Bail if the request has no preview token
+		if ( '' === $this->get_request_token() ) { return; }
+
+		// Bail if the preview token is valid
+		if ( $this->is_preview_request() ) { return; }
+
+		// Bail if loading an admin page, which ignores preview tokens
+		if ( is_admin() && ! wp_doing_ajax() ) { return; }
+
+		wp_die( esc_html__( 'This preview has expired. Reload the admin page to start a new preview.', 'fluid-checkout' ), esc_html__( 'Preview expired', 'fluid-checkout' ), array( 'response' => 403 ) );
+	}
 
 	/**
 	 * Get the message shown when an order is placed in the preview.

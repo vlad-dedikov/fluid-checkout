@@ -45,6 +45,7 @@
 		isActiveClass:               'is-active',
 		pageAttribute:               'data-fc-settings-preview-page',
 		requiresProAttribute:        'data-requires-pro',
+		urlAttribute:                'data-fc-settings-preview-url',
 		viewportAttribute:           'data-viewport',
 		zoomMin:                     50,
 		zoomMax:                     200,
@@ -57,16 +58,11 @@
 		hiddenTabs:                  [ 'dashboard', 'license_keys' ],
 		initialTab:                  'checkout',
 		initialPage:                 'checkout',
-		previewProUrlTemplate:       'https://fluidcheckout.com/pricing/?mtm_campaign=upgrade-pro&mtm_kwd=settings-preview-{page}&mtm_source=lite-plugin',
+		placeholderSrcdocs:          {},
 		i18n: {
 			expand:                  'Expand preview',
 			collapse:                'Collapse preview',
 			showPreview:             'Preview',
-			preview:                 'Page preview',
-			previewTitle:            '%s preview',
-			previewSubtitle:         'Isolated session · fields read-only',
-			previewSubtitlePro:      'Available with %s.',
-			previewProLinkLabel:     'Fluid Checkout PRO',
 			zoomIn:                  'Zoom in',
 			zoomOut:                 'Zoom out',
 		},
@@ -192,75 +188,6 @@
 		if ( ! width || ! height ) { return; }
 
 		dims.textContent = width + ' \u00d7 ' + height;
-	};
-
-	/**
-	 * Escape text for safe HTML insertion.
-	 *
-	 * @param   {string}  text  Raw text.
-	 * @return  {string}
-	 */
-	var escapeHtml = function( text ) {
-		var el = document.createElement( 'span' );
-		el.textContent = text || '';
-		return el.innerHTML;
-	};
-
-	/**
-	 * Build the PRO unlock subtitle HTML with a pricing link.
-	 *
-	 * @param   {string}  page  Preview page slug.
-	 * @return  {string}
-	 */
-	var getProPreviewSubtitleHtml = function( page ) {
-		var pageSlug = String( page || '' ).replace( /_/g, '-' );
-		var url = ( _settings.previewProUrlTemplate || '' ).replace( '{page}', pageSlug );
-		var linkLabel = _settings.i18n.previewProLinkLabel || 'Fluid Checkout PRO';
-		var linkHtml = '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + escapeHtml( linkLabel ) + '</a>';
-
-		return ( _settings.i18n.previewSubtitlePro || 'Available with %s.' ).replace( '%s', linkHtml );
-	};
-
-	/**
-	 * Update the preview iframe title and subtitle for the selected page.
-	 *
-	 * @param  {string}   page         Preview page slug.
-	 * @param  {string}   pageLabel    Label of the selected preview page.
-	 * @param  {boolean}  requiresPro  Whether the page preview requires PRO.
-	 */
-	var setPreviewContent = function( page, pageLabel, requiresPro ) {
-		var frame = document.querySelector( _settings.frameSelector );
-		var doc;
-		var titleEl;
-		var subtitleEl;
-
-		// Bail if frame is missing
-		if ( ! frame ) { return; }
-
-		try {
-			doc = frame.contentDocument;
-		} catch ( err ) {
-			return;
-		}
-
-		// Bail if iframe document is not available
-		if ( ! doc ) { return; }
-
-		titleEl = doc.getElementById( 'fc-settings-preview-title' );
-		if ( titleEl ) {
-			titleEl.textContent = ( _settings.i18n.previewTitle || '%s preview' ).replace( '%s', pageLabel );
-		}
-
-		subtitleEl = doc.getElementById( 'fc-settings-preview-subtitle' );
-		if ( subtitleEl ) {
-			if ( requiresPro ) {
-				subtitleEl.innerHTML = getProPreviewSubtitleHtml( page );
-			}
-			// Otherwise show the isolated-session subtitle
-			else {
-				subtitleEl.textContent = _settings.i18n.previewSubtitle || 'Isolated session · fields read-only';
-			}
-		}
 	};
 
 	/**
@@ -588,7 +515,32 @@
 	};
 
 	/**
-	 * Activate a preview page tab and update the placeholder iframe.
+	 * Load a page preview in the iframe, or the placeholder for pages that cannot be previewed.
+	 *
+	 * @param  {string}   page         Preview page slug.
+	 * @param  {string}   url          Preview URL of the page, empty when the page cannot be previewed.
+	 * @param  {boolean}  requiresPro  Whether the page preview requires PRO.
+	 */
+	var setPreviewFrameSource = function( page, url, requiresPro ) {
+		var frame = document.querySelector( _settings.frameSelector );
+
+		// Bail if frame is missing
+		if ( ! frame ) { return; }
+
+		// Maybe show the placeholder
+		if ( requiresPro || ! url ) {
+			frame.setAttribute( 'srcdoc', _settings.placeholderSrcdocs[ page ] );
+			frame.removeAttribute( 'src' );
+		}
+		// Otherwise, maybe load the page preview, unless it is already loaded
+		else if ( url !== frame.getAttribute( 'src' ) ) {
+			frame.setAttribute( 'src', url );
+			frame.removeAttribute( 'srcdoc' );
+		}
+	};
+
+	/**
+	 * Activate a preview page tab and load its preview or placeholder in the iframe.
 	 *
 	 * @param  {string}   page         Preview page slug.
 	 * @param  {boolean}  requiresPro  Whether the page requires PRO when inactive.
@@ -596,7 +548,7 @@
 	var setPreviewPage = function( page, requiresPro ) {
 		var pageTabs = document.querySelectorAll( _settings.pageTabSelector );
 		var panel = document.querySelector( _settings.panelSelector );
-		var pageLabel = _settings.i18n.preview;
+		var url = '';
 		var i;
 		var tab;
 		var isActive;
@@ -609,7 +561,7 @@
 			tab.setAttribute( 'aria-selected', isActive ? 'true' : 'false' );
 
 			if ( isActive ) {
-				pageLabel = tab.textContent.trim();
+				url = tab.getAttribute( _settings.urlAttribute );
 			}
 		}
 
@@ -618,7 +570,7 @@
 			panel.removeAttribute( 'hidden' );
 		}
 
-		setPreviewContent( page, pageLabel, requiresPro );
+		setPreviewFrameSource( page, url, requiresPro );
 		applyPreviewZoom();
 		updatePreviewDims();
 	};

@@ -60,25 +60,29 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			'checkout'       => array(
 				'label'        => __( 'Checkout', 'fluid-checkout' ),
 				'requires_pro' => false,
+				'url'          => wc_get_checkout_url(),
 			),
 			'cart'           => array(
 				'label'        => __( 'Cart', 'fluid-checkout' ),
 				'requires_pro' => ! $is_pro_activated,
+				'url'          => wc_get_cart_url(),
 			),
 			'order_received' => array(
 				'label'        => __( 'Thank you', 'fluid-checkout' ),
 				'requires_pro' => ! $is_pro_activated,
+				'url'          => '', // Not previewed yet, as the page needs an order
 			),
 			'order_pay'      => array(
 				'label'        => __( 'Order pay', 'fluid-checkout' ),
 				'requires_pro' => ! $is_pro_activated,
+				'url'          => '', // Not previewed yet, as the page needs an order
 			),
 		);
 
 		/**
 		 * Filter preview page tabs on the Fluid Checkout settings page.
 		 *
-		 * @param  array  $pages  Map of page slug => args (`label`, `requires_pro`).
+		 * @param  array  $pages  Map of page slug => args (`label`, `requires_pro`, `url` of the frontend page to preview).
 		 */
 		return apply_filters( 'fc_admin_settings_preview_pages', $pages );
 	}
@@ -98,6 +102,19 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 		}
 
 		return 'checkout';
+	}
+
+	/**
+	 * Get the preview URL of a preview page, which loads the page in the preview iframe.
+	 *
+	 * @param  array  $page_args  Preview page arguments.
+	 * @return string             Preview URL, or an empty string when the page cannot be previewed.
+	 */
+	public function get_preview_page_url( $page_args ) {
+		// Bail if the page requires PRO or has no frontend page to preview
+		if ( ! empty( $page_args[ 'requires_pro' ] ) || empty( $page_args[ 'url' ] ) ) { return ''; }
+
+		return FluidCheckout_Admin_Preview::instance()->get_preview_url( $page_args[ 'url' ] );
 	}
 
 
@@ -134,19 +151,12 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 				'hiddenTabs'             => self::HIDDEN_TABS,
 				'initialTab'             => $page->get_current_tab(),
 				'initialPage'            => $this->get_preview_page_for_tab( $page->get_current_tab() ),
-				'previewProUrlTemplate'  => 'https://fluidcheckout.com/pricing/?mtm_campaign=upgrade-pro&mtm_kwd=settings-preview-{page}&mtm_source=lite-plugin',
+				'placeholderSrcdocs'     => $this->get_placeholder_iframe_srcdocs(),
 				'compactBreakpoint'      => 1280,
 				'i18n'                   => array(
 					'expand'               => __( 'Expand preview', 'fluid-checkout' ),
 					'collapse'             => __( 'Collapse preview', 'fluid-checkout' ),
 					'showPreview'          => __( 'Preview', 'fluid-checkout' ),
-					'preview'              => __( 'Page preview', 'fluid-checkout' ),
-					/* translators: %s: preview page label, e.g. Checkout */
-					'previewTitle'         => __( '%s preview', 'fluid-checkout' ),
-					'previewSubtitle'      => __( 'Isolated session · fields read-only', 'fluid-checkout' ),
-					/* translators: %s: HTML link to Fluid Checkout PRO pricing page */
-					'previewSubtitlePro'   => __( 'Available with %s.', 'fluid-checkout' ),
-					'previewProLinkLabel'  => __( 'Fluid Checkout PRO', 'fluid-checkout' ),
 					'zoomIn'               => __( 'Zoom in', 'fluid-checkout' ),
 					'zoomOut'              => __( 'Zoom out', 'fluid-checkout' ),
 				),
@@ -166,6 +176,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 		$initial_page = $this->get_preview_page_for_tab( $current_tab );
 		$is_visible = $this->is_preview_visible_for_tab( $current_tab );
 		$initial_requires_pro = ! empty( $pages[ $initial_page ][ 'requires_pro' ] );
+		$preview_urls = array_map( array( $this, 'get_preview_page_url' ), $pages ); // Once, so the iframe and its tab get the same token
 		$iframe_srcdoc = $this->get_placeholder_iframe_srcdoc( $pages[ $initial_page ][ 'label' ], $initial_requires_pro, $initial_page );
 		?>
 		<aside
@@ -267,6 +278,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 						aria-selected="<?php echo $is_active ? 'true' : 'false'; ?>"
 						data-fc-settings-preview-page="<?php echo esc_attr( $page_slug ); ?>"
 						data-requires-pro="<?php echo ! empty( $page_args[ 'requires_pro' ] ) ? 'yes' : 'no'; ?>"
+						data-fc-settings-preview-url="<?php echo esc_url( $preview_urls[ $page_slug ] ); ?>"
 					><?php echo esc_html( $page_args[ 'label' ] ); ?></button>
 				<?php endforeach; ?>
 			</div>
@@ -278,7 +290,11 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 						class="fc-settings-preview__frame"
 						data-fc-settings-preview-frame
 						title="<?php echo esc_attr( __( 'Page preview', 'fluid-checkout' ) ); ?>"
-						srcdoc="<?php echo esc_attr( $iframe_srcdoc ); ?>"
+						<?php if ( ! empty( $preview_urls[ $initial_page ] ) ) : ?>
+							src="<?php echo esc_url( $preview_urls[ $initial_page ] ); ?>"
+						<?php else : ?>
+							srcdoc="<?php echo esc_attr( $iframe_srcdoc ); ?>"
+						<?php endif; ?>
 					></iframe>
 				</div>
 			</div>
@@ -324,6 +340,23 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			__( 'Available with %s.', 'fluid-checkout' ),
 			$link
 		);
+	}
+
+	/**
+	 * Get the placeholder documents shown in the preview iframe for pages that cannot be previewed.
+	 *
+	 * @return array  Placeholder documents by preview page slug.
+	 */
+	public function get_placeholder_iframe_srcdocs() {
+		// Define placeholder documents
+		$placeholders = array();
+
+		// Iterate preview pages
+		foreach ( $this->get_preview_pages() as $page_slug => $page_args ) {
+			$placeholders[ $page_slug ] = $this->get_placeholder_iframe_srcdoc( $page_args[ 'label' ], ! empty( $page_args[ 'requires_pro' ] ), $page_slug );
+		}
+
+		return $placeholders;
 	}
 
 	/**
