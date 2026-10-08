@@ -36,6 +36,13 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 	private $customer_meta = null;
 
 	/**
+	 * Dummy values of order fields by field key, cached after first retrieval.
+	 *
+	 * @var array|null
+	 */
+	private $order_fields = null;
+
+	/**
 	 * Dummy product properties by dummy product ID, cached after first retrieval.
 	 *
 	 * @var array|null
@@ -213,6 +220,30 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 		$this->customer_meta = array_merge( $meta, $this->get_customer_name(), $this->get_customer_fields() );
 
 		return $this->customer_meta;
+	}
+
+
+
+	/**
+	 * Get the values of the order fields the dummy customer fills at checkout, such as order notes.
+	 *
+	 * @return  array  Field values by field key.
+	 */
+	public function get_order_fields() {
+		// Maybe build the order fields, only once per request
+		if ( null === $this->order_fields ) {
+			// Cache an empty list before filtering, as filter callbacks may read the order fields again
+			$this->order_fields = array();
+
+			/**
+			 * Filter the values of the order fields the dummy customer fills at checkout in the admin preview, for example to fill order fields added by other plugins.
+			 */
+			$this->order_fields = (array) apply_filters( 'fc_admin_preview_dummy_order_fields', array(
+				'order_comments'    => _x( 'Please leave the package at the front door.', 'Dummy order notes in the admin preview', 'fluid-checkout' ),
+			) );
+		}
+
+		return $this->order_fields;
 	}
 
 

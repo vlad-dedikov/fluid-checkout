@@ -185,6 +185,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Dummy customer fields
 		add_action( 'wp_loaded', array( $this, 'maybe_set_dummy_guest_customer_fields' ), 5 ); // Before WooCommerce loads the cart and calculates shipping at priority `10`
 		add_action( 'wp_loaded', array( $this, 'set_dummy_new_address_session_values' ), 5 );
+		add_action( 'wp_loaded', array( $this, 'set_dummy_order_fields_session_values' ), 5 );
 		add_filter( 'woocommerce_checkout_get_value', array( $this, 'maybe_get_dummy_checkout_field_value' ), PHP_INT_MAX, 2 ); // Last, to only fill fields that other filters leave empty, such as with session values
 	}
 
@@ -715,6 +716,19 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Iterate dummy customer fields
 		foreach ( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_customer_fields() as $field_key => $value ) {
 			FluidCheckout_Steps::instance()->set_checkout_field_value_to_session( 'save_' . $field_key, $value );
+		}
+	}
+
+	/**
+	 * Set the dummy values of order fields, such as order notes, in the session, where Fluid Checkout and its add-ons read them.
+	 */
+	public function set_dummy_order_fields_session_values() {
+		// Bail if session is not available
+		if ( ! WC()->session instanceof WC_Session ) { return; }
+
+		// Iterate dummy order fields
+		foreach ( FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_order_fields() as $field_key => $value ) {
+			FluidCheckout_Steps::instance()->set_checkout_field_value_to_session( $field_key, $value );
 		}
 	}
 

@@ -24,6 +24,8 @@
 	var _publicMethods = {};
 	var _previewZoom = 100;
 	var _collapseTimer = null;
+	var _previewMode = 'guest';
+	var _isHeaderFooterVisible = false;
 	var _settings = {
 		layoutSelector:              '[data-fc-settings-layout]',
 		previewSelector:             '[data-fc-settings-preview]',
@@ -37,6 +39,8 @@
 		zoomInSelector:              '[data-fc-settings-preview-zoom-in]',
 		zoomOutSelector:             '[data-fc-settings-preview-zoom-out]',
 		zoomValueSelector:           '[data-fc-settings-preview-zoom-value]',
+		modeSelector:                '[data-fc-settings-preview-mode]',
+		headerFooterSelector:        '[data-fc-settings-preview-header-footer]',
 		viewportInputName:           'fc-settings-preview-viewport',
 		hasPreviewClass:             'has-preview',
 		isExpandedClass:             'is-preview-expanded',
@@ -44,7 +48,6 @@
 		isCollapsingClass:           'is-preview-collapsing',
 		isActiveClass:               'is-active',
 		pageAttribute:               'data-fc-settings-preview-page',
-		requiresProAttribute:        'data-requires-pro',
 		urlAttribute:                'data-fc-settings-preview-url',
 		viewportAttribute:           'data-viewport',
 		zoomMin:                     50,
@@ -59,12 +62,20 @@
 		initialTab:                  'checkout',
 		initialPage:                 'checkout',
 		placeholderSrcdocs:          {},
+		defaultPage:                 'checkout',
+		readOnlyFields:              'yes',
+		modeQueryArg:                'fc_preview_mode',
+		guestMode:                   'guest',
+		messageSource:               'fc-admin-preview',
+		storageKey:                  'fcAdminSettingsPreview',
 		i18n: {
 			expand:                  'Expand preview',
 			collapse:                'Collapse preview',
 			showPreview:             'Preview',
 			zoomIn:                  'Zoom in',
 			zoomOut:                 'Zoom out',
+			showHeaderFooter:        'Show header and footer',
+			hideHeaderFooter:        'Hide header and footer',
 		},
 	};
 	var _compactMediaQuery = null;
@@ -152,7 +163,7 @@
 			return tab;
 		}
 
-		return 'checkout';
+		return _settings.defaultPage;
 	};
 
 	/**
@@ -517,24 +528,24 @@
 	/**
 	 * Load a page preview in the iframe, or the placeholder for pages that cannot be previewed.
 	 *
-	 * @param  {string}   page         Preview page slug.
-	 * @param  {string}   url          Preview URL of the page, empty when the page cannot be previewed.
-	 * @param  {boolean}  requiresPro  Whether the page preview requires PRO.
+	 * @param  {string}  page  Preview page slug.
+	 * @param  {string}  url   Preview URL of the page in guest mode, empty when the page cannot be previewed, such as pages that require PRO.
 	 */
-	var setPreviewFrameSource = function( page, url, requiresPro ) {
+	var setPreviewFrameSource = function( page, url ) {
 		var frame = document.querySelector( _settings.frameSelector );
+		var previewUrl = getPreviewModeUrl( url );
 
 		// Bail if frame is missing
 		if ( ! frame ) { return; }
 
 		// Maybe show the placeholder
-		if ( requiresPro || ! url ) {
+		if ( ! url ) {
 			frame.setAttribute( 'srcdoc', _settings.placeholderSrcdocs[ page ] );
 			frame.removeAttribute( 'src' );
 		}
 		// Otherwise, maybe load the page preview, unless it is already loaded
-		else if ( url !== frame.getAttribute( 'src' ) ) {
-			frame.setAttribute( 'src', url );
+		else if ( previewUrl !== frame.getAttribute( 'src' ) ) {
+			frame.setAttribute( 'src', previewUrl );
 			frame.removeAttribute( 'srcdoc' );
 		}
 	};
@@ -542,10 +553,9 @@
 	/**
 	 * Activate a preview page tab and load its preview or placeholder in the iframe.
 	 *
-	 * @param  {string}   page         Preview page slug.
-	 * @param  {boolean}  requiresPro  Whether the page requires PRO when inactive.
+	 * @param  {string}  page  Preview page slug.
 	 */
-	var setPreviewPage = function( page, requiresPro ) {
+	var setPreviewPage = function( page ) {
 		var pageTabs = document.querySelectorAll( _settings.pageTabSelector );
 		var panel = document.querySelector( _settings.panelSelector );
 		var url = '';
@@ -570,7 +580,7 @@
 			panel.removeAttribute( 'hidden' );
 		}
 
-		setPreviewFrameSource( page, url, requiresPro );
+		setPreviewFrameSource( page, url );
 		applyPreviewZoom();
 		updatePreviewDims();
 	};
@@ -581,20 +591,150 @@
 	 * @param  {string}  tab  Settings tab slug.
 	 */
 	var syncFromSettingsTab = function( tab ) {
-		var page;
-		var pageTab;
-		var requiresPro;
-
 		setPreviewVisibilityForTab( tab );
 
 		// Bail if preview is hidden for this tab
 		if ( ! isPreviewVisibleForTab( tab ) ) { return; }
 
-		page = getPreviewPageForTab( tab );
-		pageTab = document.querySelector( '[' + _settings.pageAttribute + '="' + page + '"]' );
-		requiresPro = pageTab && 'yes' === pageTab.getAttribute( _settings.requiresProAttribute );
+		setPreviewPage( getPreviewPageForTab( tab ) );
+	};
 
-		setPreviewPage( page, requiresPro );
+
+
+	/**
+	 * Get the preview state saved in the browser: preview mode, header and footer visibility, and expanded state.
+	 *
+	 * @return  {Object}  Saved preview state.
+	 */
+	var getSavedState = function() {
+		// Read saved state, as browser storage can be blocked or unavailable
+		try {
+			return JSON.parse( window.localStorage.getItem( _settings.storageKey ) ) || {};
+		}
+		// Use an empty state when browser storage is not available
+		catch ( error ) {
+			return {};
+		}
+	};
+
+	/**
+	 * Save a value of the preview state in the browser.
+	 *
+	 * @param  {string}  key    State key.
+	 * @param  {*}       value  State value.
+	 */
+	var saveState = function( key, value ) {
+		var state = getSavedState();
+
+		// Save state, as browser storage can be blocked or unavailable
+		try {
+			state[ key ] = value;
+			window.localStorage.setItem( _settings.storageKey, JSON.stringify( state ) );
+		}
+		// Keep the state for this page load only when browser storage is not available
+		catch ( error ) {
+			// Intentionally empty
+		}
+	};
+
+
+
+	/**
+	 * Get the origin of the page preview loaded in the iframe.
+	 *
+	 * @return  {string}  Preview origin, or an empty string when the iframe shows a placeholder.
+	 */
+	var getPreviewOrigin = function() {
+		var frame = document.querySelector( _settings.frameSelector );
+
+		// Bail if the iframe shows a placeholder
+		if ( ! frame || ! frame.getAttribute( 'src' ) ) { return ''; }
+
+		return new URL( frame.getAttribute( 'src' ), window.location.href ).origin;
+	};
+
+	/**
+	 * Send a message to the page preview loaded in the iframe.
+	 *
+	 * @param  {Object}  message  Message with its `type` and values.
+	 */
+	var postMessageToPreview = function( message ) {
+		var frame = document.querySelector( _settings.frameSelector );
+		var origin = getPreviewOrigin();
+
+		// Bail if the iframe shows a placeholder
+		if ( ! origin ) { return; }
+
+		// Send message to the preview origin only
+		message.source = _settings.messageSource;
+		frame.contentWindow.postMessage( message, origin );
+	};
+
+
+
+	/**
+	 * Add the preview mode to a page preview URL.
+	 *
+	 * @param   {string}  url  Page preview URL in guest mode.
+	 * @return  {string}       Page preview URL in the selected mode.
+	 */
+	var getPreviewModeUrl = function( url ) {
+		// Bail if no URL, or in guest mode which page preview URLs use by default
+		if ( ! url || _settings.guestMode === _previewMode ) { return url; }
+
+		return url + ( -1 === url.indexOf( '?' ) ? '?' : '&' ) + _settings.modeQueryArg + '=' + encodeURIComponent( _previewMode );
+	};
+
+	/**
+	 * Set the preview mode, as selected in the mode dropdown.
+	 *
+	 * @param  {string}  mode  Preview mode.
+	 */
+	var setPreviewMode = function( mode ) {
+		var modeSelect = document.querySelector( _settings.modeSelector );
+
+		// Bail if the mode dropdown is missing
+		if ( ! modeSelect ) { return; }
+
+		// Select the mode, using guest mode for modes the dropdown does not have
+		modeSelect.value = mode;
+		_previewMode = modeSelect.value || _settings.guestMode;
+		modeSelect.value = _previewMode;
+	};
+
+	/**
+	 * Load the active page tab in the page preview, such as after changing the preview mode.
+	 */
+	var loadActivePreviewPage = function() {
+		var pageTab = document.querySelector( _settings.pageTabSelector + '.' + _settings.isActiveClass );
+
+		// Bail if no page tab is active
+		if ( ! pageTab ) { return; }
+
+		// Load the page of the active tab
+		setPreviewPage( pageTab.getAttribute( _settings.pageAttribute ) );
+	};
+
+	/**
+	 * Show or hide the site header and footer in the page preview.
+	 *
+	 * @param  {boolean}  visible  Whether the header and footer are visible.
+	 */
+	var setHeaderFooterVisible = function( visible ) {
+		var button = document.querySelector( _settings.headerFooterSelector );
+		var label = visible ? _settings.i18n.hideHeaderFooter : _settings.i18n.showHeaderFooter;
+
+		_isHeaderFooterVisible = visible;
+
+		// Maybe update the toggle button
+		if ( button ) {
+			button.setAttribute( 'aria-pressed', visible ? 'true' : 'false' );
+			button.setAttribute( 'aria-label', label );
+			button.setAttribute( 'title', label );
+		}
+
+		// Show or hide them in the page preview
+		postMessageToPreview( { type: 'setHeaderFooterVisibility', visible: visible } );
 	};
 
 
@@ -606,11 +746,20 @@
 	 */
 	var handleExpandClick = function( e ) {
 		var layout = getLayout();
+		var expanded;
 
 		// Bail if layout is missing
 		if ( ! layout ) { return; }
 
-		setPreviewExpanded( ! layout.classList.contains( _settings.isExpandedClass ) );
+		// Toggle the expanded state
+		expanded = ! layout.classList.contains( _settings.isExpandedClass );
+		setPreviewExpanded( expanded );
+
+		// Maybe remember the expanded state, except for the drawer of the compact layout
+		if ( ! isCompactPreviewLayout() ) {
+			saveState( 'expanded', expanded );
+		}
+
 		e.preventDefault();
 	};
 
@@ -689,19 +838,65 @@
 	var handlePageTabClick = function( e ) {
 		var tab = e.target.closest( _settings.pageTabSelector );
 		var page;
-		var requiresPro;
 
 		// Bail if click was not on a page tab
 		if ( ! tab ) { return; }
 
 		page = tab.getAttribute( _settings.pageAttribute );
-		requiresPro = 'yes' === tab.getAttribute( _settings.requiresProAttribute );
 
 		// Bail if page slug is missing
 		if ( ! page ) { return; }
 
-		setPreviewPage( page, requiresPro );
+		setPreviewPage( page );
 		e.preventDefault();
+	};
+
+	/**
+	 * Handle preview mode dropdown changes.
+	 *
+	 * @param  {Event}  e  Change event.
+	 */
+	var handleModeChange = function( e ) {
+		// Bail if the change is not for the mode dropdown
+		if ( ! e.target.matches( _settings.modeSelector ) ) { return; }
+
+		// Load the active page in the new mode, remembered in the browser
+		setPreviewMode( e.target.value );
+		saveState( 'mode', _previewMode );
+		loadActivePreviewPage();
+	};
+
+	/**
+	 * Handle header and footer toggle clicks.
+	 *
+	 * @param  {Event}  e  Click event.
+	 */
+	var handleHeaderFooterClick = function( e ) {
+		// Bail if click was not on the header and footer toggle
+		if ( ! e.target.closest( _settings.headerFooterSelector ) ) { return; }
+
+		// Toggle the header and footer, remembered in the browser
+		setHeaderFooterVisible( ! _isHeaderFooterVisible );
+		saveState( 'headerFooter', _isHeaderFooterVisible );
+		e.preventDefault();
+	};
+
+	/**
+	 * Handle messages from the page preview and route to the appropriate handler.
+	 *
+	 * @param  {MessageEvent}  e  Message event.
+	 */
+	var handleMessage = function( e ) {
+		var frame = document.querySelector( _settings.frameSelector );
+
+		// Bail if the message does not come from the page preview in the iframe
+		if ( ! frame || frame.contentWindow !== e.source || getPreviewOrigin() !== e.origin || ! e.data || _settings.messageSource !== e.data.source ) { return; }
+
+		// READY
+		if ( 'ready' === e.data.type ) {
+			postMessageToPreview( { type: 'setHeaderFooterVisibility', visible: _isHeaderFooterVisible } );
+			postMessageToPreview( { type: 'setReadOnlyFields', readOnly: 'yes' === _settings.readOnlyFields } );
+		}
 	};
 
 	/**
@@ -731,6 +926,7 @@
 		var frame;
 		var breakpoint;
 		var navCompactBreakpoint;
+		var savedState;
 
 		// Bail if already initialized
 		if ( _hasInitialized ) { return; }
@@ -774,6 +970,9 @@
 		document.addEventListener( 'change', handleViewportChange, true );
 		document.addEventListener( 'click', handlePageTabClick, true );
 		document.addEventListener( 'click', handleZoomClick, true );
+		document.addEventListener( 'change', handleModeChange, true );
+		document.addEventListener( 'click', handleHeaderFooterClick, true );
+		window.addEventListener( 'message', handleMessage );
 		window.addEventListener( 'fcSettingsTabActivated', handleSettingsTabActivated );
 		// Capture scroll from nested containers; keep the drawer aligned while sticky headers move
 		window.addEventListener( 'scroll', syncPreviewDrawerPosition, true );
@@ -803,6 +1002,11 @@
 			} );
 		}
 
+		// Restore the preview mode and header and footer visibility saved in the browser
+		savedState = getSavedState();
+		setPreviewMode( savedState.mode || _settings.guestMode );
+		setHeaderFooterVisible( true === savedState.headerFooter );
+
 		// Sync from the initial settings tab and zoom UI
 		setPreviewZoom( _previewZoom );
 		syncFromSettingsTab( _settings.initialTab );
@@ -810,6 +1014,10 @@
 		// Start with the compact drawer closed
 		if ( isCompactPreviewLayout() ) {
 			setPreviewExpanded( false );
+		}
+		// Otherwise, maybe sync the expand button with the expanded preview restored before the page rendered
+		else if ( getLayout().classList.contains( _settings.isExpandedClass ) ) {
+			syncPreviewExpandedControls( true );
 		}
 
 		syncPreviewDrawerPosition();
