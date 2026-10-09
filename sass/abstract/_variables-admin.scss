@@ -117,6 +117,8 @@ $fc-settings-preview-border-width:          1px !default;
 $fc-settings-preview-frame-border-width:    1px !default;
 // Inner preview frame width (panel paddings and frame borders are added separately)
 $fc-settings-preview-min-width:             280px !default;
+// Distance of the preview column from the admin menu on desktop, where the expanded preview starts and ends its transitions
+$fc-settings-preview-column-offset:         $fc-settings-sidebar-width + $fc-settings-content-max-width !default;
 // Below this width the preview starts collapsed and opens vertically from the actions bar
 $fc-settings-preview-compact-breakpoint:    1280px !default;
 $fc-settings-preview-transition-duration:   .28s !default;

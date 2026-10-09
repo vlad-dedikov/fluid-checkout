@@ -45,7 +45,7 @@ $fc-settings-preview-column-min-width: calc( #{$fc-settings-preview-min-width} +
 	max-width: none;
 }
 
-// Desktop: expand as a fixed overlay that slides in from the right.
+// Desktop: expand as a fixed overlay that grows from the preview column to the admin menu.
 // Keep left/center column widths locked so only the preview moves.
 @media ( min-width: $fc-settings-preview-compact-breakpoint + 1px ) {
 	.fc-settings-layout.has-preview .fc-settings-sidebar {
@@ -75,33 +75,32 @@ $fc-settings-preview-column-min-width: calc( #{$fc-settings-preview-min-width} +
 		min-height: 0;
 		border-left: 0;
 		border-top: 0;
-		opacity: 1;
-		transform: none;
-		pointer-events: auto;
-		transition: opacity $fc-settings-preview-transition-duration $fc-settings-preview-transition-easing, transform $fc-settings-preview-transition-duration $fc-settings-preview-transition-easing;
+		transition: left $fc-settings-preview-transition-duration $fc-settings-preview-transition-easing, right $fc-settings-preview-transition-duration $fc-settings-preview-transition-easing;
 
 		@media ( prefers-reduced-motion: reduce ) {
 			transition: none;
 		}
 	}
 
-	// Enter start frame: no transition so the overlay starts off-screen instantly
-	.fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview {
-		opacity: 0;
-		transform: translateX( 100% );
+	// Enter start and exit frames: the overlay edge at the preview column position, so it grows from and shrinks back into the column
+	.fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview,
+	.fc-settings-layout.is-preview-expanded.is-preview-collapsing .fc-settings-preview {
+		left: $admin-wp-menu-width + $fc-settings-preview-column-offset;
 		pointer-events: none;
-		transition: none;
 	}
 
-	// Exit frame: slide out with the same transition as expand
-	.fc-settings-layout.is-preview-expanded.is-preview-collapsing .fc-settings-preview {
-		opacity: 0;
-		transform: translateX( 100% );
-		pointer-events: none;
+	// Enter start frame: no transition so the overlay starts at the preview column instantly
+	.fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview {
+		transition: none;
 	}
 
 	body.fc-settings-page.folded .fc-settings-layout.is-preview-expanded .fc-settings-preview {
 		left: $admin-wp-menu-width-folded;
+	}
+
+	body.fc-settings-page.folded .fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview,
+	body.fc-settings-page.folded .fc-settings-layout.is-preview-expanded.is-preview-collapsing .fc-settings-preview {
+		left: $admin-wp-menu-width-folded + $fc-settings-preview-column-offset;
 	}
 
 	body.rtl.fc-settings-page .fc-settings-layout.is-preview-expanded .fc-settings-preview {
@@ -115,7 +114,13 @@ $fc-settings-preview-column-min-width: calc( #{$fc-settings-preview-min-width} +
 
 	body.rtl.fc-settings-page .fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview,
 	body.rtl.fc-settings-page .fc-settings-layout.is-preview-expanded.is-preview-collapsing .fc-settings-preview {
-		transform: translateX( -100% );
+		left: 0;
+		right: $admin-wp-menu-width + $fc-settings-preview-column-offset;
+	}
+
+	body.rtl.fc-settings-page.folded .fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview,
+	body.rtl.fc-settings-page.folded .fc-settings-layout.is-preview-expanded.is-preview-collapsing .fc-settings-preview {
+		right: $admin-wp-menu-width-folded + $fc-settings-preview-column-offset;
 	}
 
 	body.rtl.fc-settings-page .fc-settings-layout.is-preview-expanded.is-preview-enter .fc-settings-preview {

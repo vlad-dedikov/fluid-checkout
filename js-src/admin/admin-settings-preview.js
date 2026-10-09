@@ -292,9 +292,57 @@
 	};
 
 	/**
+	 * Get the page preview scale for an available width, scaled down to fit and never up.
+	 *
+	 * @param   {number}  availableWidth  Width available for the page preview.
+	 * @return  {number}                  Page preview scale.
+	 */
+	var getPreviewScale = function( availableWidth ) {
+		return Math.min( 1, availableWidth / _previewWidth );
+	};
+
+	/**
+	 * Get the page preview scale while the preview expands or collapses, so the page preview grows or shrinks along with the column until the end.
+	 * Fitting the available width alone reaches the full page preview width midway, as the page preview is never scaled up.
+	 *
+	 * @param   {Element}  preview         Preview column element.
+	 * @param   {number}   availableWidth  Width available for the page preview.
+	 * @return  {number|undefined}         Page preview scale, or `undefined` when the preview is not expanding or collapsing.
+	 */
+	var getTransitionPreviewScale = function( preview, availableWidth ) {
+		var animations = typeof preview.getAnimations === 'function' ? preview.getAnimations() : [];
+		var property;
+		var keyframes;
+		var edgeOffset;
+		var startWidth;
+		var endWidth;
+		var startScale;
+		var i;
+
+		// Iterate preview animations
+		for ( i = 0; i < animations.length; i++ ) {
+			property = animations[ i ].transitionProperty;
+
+			// Skip animations other than the moving edge transition, which is the right edge in RTL
+			if ( 'left' !== property && 'right' !== property ) { continue; }
+
+			// Get the available widths at the start and end of the transition, as the width changes as much as the edge moves
+			keyframes = animations[ i ].effect.getKeyframes();
+			edgeOffset = parseFloat( window.getComputedStyle( preview )[ property ] );
+			startWidth = availableWidth + edgeOffset - parseFloat( keyframes[ 0 ][ property ] );
+			endWidth = availableWidth + edgeOffset - parseFloat( keyframes[ keyframes.length - 1 ][ property ] );
+			startScale = getPreviewScale( startWidth );
+
+			// Return the scale as far between the start and end scales as the available width is between the start and end widths
+			return startScale + ( getPreviewScale( endWidth ) - startScale ) * ( availableWidth - startWidth ) / ( endWidth - startWidth );
+		}
+	};
+
+	/**
 	 * Apply the page preview width to the frame, scaled down to the available width and filling the available height.
 	 */
 	var applyPreviewSize = function() {
+		var preview = getPreview();
 		var panel = document.querySelector( _settings.panelSelector );
 		var frameWrap = document.querySelector( _settings.frameWrapSelector );
 		var frame = document.querySelector( _settings.frameSelector );
@@ -308,8 +356,8 @@
 		var scale;
 		var frameHeight;
 
-		// Bail if the panel, frame wrap or frame is missing
-		if ( ! panel || ! frameWrap || ! frame ) { return; }
+		// Bail if the preview, panel, frame wrap or frame is missing
+		if ( ! preview || ! panel || ! frameWrap || ! frame ) { return; }
 
 		// Get the space available for the page preview, inside the panel padding and the frame border
 		panelStyle = window.getComputedStyle( panel );
@@ -320,8 +368,8 @@
 		// Bail if the available space is not known, such as while the preview is hidden
 		if ( availableWidth <= 0 || availableHeight <= 0 ) { return; }
 
-		// Scale the page preview down to the available width, never up, and fill the available height
-		scale = Math.min( 1, availableWidth / _previewWidth );
+		// Scale the page preview down to the available width, never up, along with the column while it expands or collapses, and fill the available height
+		scale = getTransitionPreviewScale( preview, availableWidth ) || getPreviewScale( availableWidth );
 		frameHeight = Math.round( availableHeight / scale );
 
 		// Size the frame to the scaled page preview, and lay the page out at the preview width
