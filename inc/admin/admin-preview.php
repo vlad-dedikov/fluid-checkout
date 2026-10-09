@@ -42,6 +42,11 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	const CART_ITEMS_LIMIT = 3;
 
 	/**
+	 * Query argument that carries the shipping methods chosen in the preview, which the frame script sends with each request.
+	 */
+	const SHIPPING_METHODS_QUERY_ARG = 'fc_preview_shipping_methods';
+
+	/**
 	 * Admin AJAX action that saves the unsaved settings shown in the preview.
 	 */
 	const DRAFT_AJAX_ACTION = 'fc_admin_preview_save_draft';
@@ -232,6 +237,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Cart items
 		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_cart_items' ), 10 );
+
+		// Shipping methods
+		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_shipping_methods' ), 10 );
 	}
 
 	/**
@@ -528,10 +536,11 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		 * Filter the settings of the admin preview frame script, for example to make more payment buttons inert.
 		 */
 		return apply_filters( 'fc_admin_preview_frame_script_settings', array(
-			'adminOrigin'            => $this->get_admin_origin(),
-			'tokenQueryArg'          => self::TOKEN_QUERY_ARG,
-			'previewArgs'            => $this->get_preview_args(),
-			'darkModeCssVariables'   => FluidCheckout_DesignTemplates::instance()->get_css_variables_dark_mode(),
+			'adminOrigin'                 => $this->get_admin_origin(),
+			'tokenQueryArg'               => self::TOKEN_QUERY_ARG,
+			'previewArgs'                 => $this->get_preview_args(),
+			'shippingMethodsQueryArg'     => self::SHIPPING_METHODS_QUERY_ARG,
+			'darkModeCssVariables'        => FluidCheckout_DesignTemplates::instance()->get_css_variables_dark_mode(),
 		) );
 	}
 
@@ -956,6 +965,17 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		}
 
 		WC()->session->set( 'cart', $cart_items );
+	}
+
+	/**
+	 * Set the shipping methods chosen in the preview, which the frame script sends with each request, as the preview session does not keep them between requests.
+	 */
+	public function maybe_set_preview_shipping_methods() {
+		// Bail if the request has no shipping methods chosen in the preview
+		if ( ! isset( $_GET[ self::SHIPPING_METHODS_QUERY_ARG ] ) || ! is_array( $_GET[ self::SHIPPING_METHODS_QUERY_ARG ] ) ) { return; }
+
+		// Set the chosen shipping methods, by package index
+		WC()->session->set( 'chosen_shipping_methods', wc_clean( wp_unslash( $_GET[ self::SHIPPING_METHODS_QUERY_ARG ] ) ) );
 	}
 
 

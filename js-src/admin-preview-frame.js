@@ -26,6 +26,7 @@
 		adminOrigin:                  '',
 		tokenQueryArg:                'fc_preview',
 		previewArgs:                  {},
+		shippingMethodsQueryArg:      'fc_preview_shipping_methods',
 		messageSource:                'fc-admin-preview',
 		darkModeCssVariables:         {},
 
@@ -36,17 +37,21 @@
 		probeId:                      'fc-admin-preview-probe',
 		customStylesId:               'fc-custom-styles',
 
-		inertActionSelector:          '#place_order, .fc-place-order-button, .fc-place-order__custom-buttons, .fc-express-checkout, .add_to_cart_button, .single_add_to_cart_button, .wc-block-components-product-button__button',
+		inertActionSelector:          '#place_order, .fc-place-order-button, .fc-place-order__custom-buttons, .fc-express-checkout, .checkout-button, .fc-cart-action__proceed-checkout, .add_to_cart_button, .single_add_to_cart_button, .wc-block-components-product-button__button',
 		linkSelector:                 'a[href], area[href]',
 		scriptLinkSelector:           '.woocommerce-terms-and-conditions-link',
 		readOnlyFieldSelector:        '.form-row input:not([type="checkbox"]):not([type="radio"]), .form-row textarea, .quantity input',
 		readOnlyControlSelector:      '.form-row select, .form-row .ts-wrapper, .form-row .select2-container, .quantity button, .quantity input[type="button"]',
+		shippingMethodSelector:       '#shipping_method input',
 		colorSchemeSelector:          ':root',
+
+		packageIndexAttribute:        'data-index',
 	};
 	var _isReadOnlyFields = true;
 	var _cssVariables = {};
 	var _colorScheme = '';
 	var _hasDarkModeClass = false;
+	var _shippingMethods = {};
 
 
 
@@ -78,12 +83,13 @@
 
 
 	/**
-	 * Maybe add the preview token and mode to jQuery AJAX requests sent to the frontend, such as admin AJAX requests from other plugins.
+	 * Maybe add the preview token and mode, and the shipping methods chosen in the page, to jQuery AJAX requests sent to the frontend, such as admin AJAX requests from other plugins.
 	 *
 	 * @param {Object}  options  jQuery AJAX request options.
 	 */
 	var maybeAddPreviewArgsToAjaxRequest = function( options ) {
 		var url;
+		var shippingMethodsArgs = {};
 
 		// Get request URL, resolving relative URLs from the preview page
 		try {
@@ -97,11 +103,18 @@
 		// Bail if the request is sent to another origin, which must not receive the preview token
 		if ( root.location.origin !== url.origin ) { return; }
 
-		// Bail if the request already has the preview token, such as WooCommerce AJAX requests
-		if ( url.searchParams.has( _settings.tokenQueryArg ) ) { return; }
+		// Maybe add the preview arguments to the request URL, unless it already has them, such as WooCommerce AJAX requests
+		if ( ! url.searchParams.has( _settings.tokenQueryArg ) ) {
+			url.search = ( url.search ? url.search + '&' : '?' ) + $.param( _settings.previewArgs );
+		}
 
-		// Add the preview arguments to the request URL, keeping its other arguments as they are
-		url.search = ( url.search ? url.search + '&' : '?' ) + $.param( _settings.previewArgs );
+		// Maybe add the shipping methods chosen in the page, as preview requests do not keep them for the next requests
+		if ( ! $.isEmptyObject( _shippingMethods ) ) {
+			shippingMethodsArgs[ _settings.shippingMethodsQueryArg ] = _shippingMethods;
+			url.search = ( url.search ? url.search + '&' : '?' ) + $.param( shippingMethodsArgs );
+		}
+
+		// Use the request URL with the preview arguments, keeping its other arguments as they are
 		options.url = url.href;
 	};
 
@@ -399,6 +412,19 @@
 	};
 
 	/**
+	 * Handle document change events and route to the appropriate handler.
+	 * Shipping methods are remembered by package index, to send them with the next requests.
+	 *
+	 * @param {Event}  e  Change event.
+	 */
+	var handleChange = function( e ) {
+		// SHIPPING METHODS
+		if ( e.target.matches( _settings.shippingMethodSelector ) ) {
+			_shippingMethods[ e.target.getAttribute( _settings.packageIndexAttribute ) ] = e.target.value;
+		}
+	};
+
+	/**
 	 * Handle messages and route to the appropriate handler.
 	 *
 	 * @param {MessageEvent}  e  Message event.
@@ -473,6 +499,7 @@
 		window.addEventListener( 'keyup', handleFieldEvent, true );
 		window.addEventListener( 'focusin', handleFieldEvent, true );
 		window.addEventListener( 'focusout', handleFieldEvent, true );
+		window.addEventListener( 'change', handleChange, true );
 		window.addEventListener( 'submit', preventAction, true ); // Stops all form submissions, as forms must not submit from the preview
 		window.addEventListener( 'message', handleMessage, true );
 
