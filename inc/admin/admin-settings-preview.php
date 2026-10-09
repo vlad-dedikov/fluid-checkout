@@ -24,6 +24,11 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 	 */
 	const COMPACT_BREAKPOINT = 1280;
 
+	/**
+	 * Page preview width set by each viewport button. Tablet and desktop match the Fluid Checkout breakpoints.
+	 */
+	const VIEWPORT_WIDTHS = array( 'mobile' => 350, 'tablet' => 750, 'desktop' => 1000 );
+
 
 
 	/**
@@ -162,7 +167,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 	 * Register preview assets.
 	 */
 	public function register_assets() {
-		wp_register_script( 'fc-admin-settings-preview', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin/admin-settings-preview' ), array(), null, array( 'in_footer' => true, 'strategy' => 'defer' ) );
+		wp_register_script( 'fc-admin-settings-preview', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin/admin-settings-preview' ), array( 'fc-utils' ), NULL, array( 'in_footer' => true, 'strategy' => 'defer' ) );
 		wp_add_inline_script( 'fc-admin-settings-preview', 'window.addEventListener("load",function(){FCAdminSettingsPreview.init(fcAdminSettingsPreviewSettings);});' );
 	}
 
@@ -200,12 +205,11 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 				'guestMode'              => FluidCheckout_Admin_Preview::MODE_GUEST,
 				'storageKey'             => self::STORAGE_KEY,
 				'compactBreakpoint'      => self::COMPACT_BREAKPOINT,
+				'viewportWidths'         => self::VIEWPORT_WIDTHS,
 				'i18n'                   => array(
 					'expand'               => __( 'Expand preview', 'fluid-checkout' ),
 					'collapse'             => __( 'Collapse preview', 'fluid-checkout' ),
 					'showPreview'          => __( 'Preview', 'fluid-checkout' ),
-					'zoomIn'               => __( 'Zoom in', 'fluid-checkout' ),
-					'zoomOut'              => __( 'Zoom out', 'fluid-checkout' ),
 					'showHeaderFooter'     => __( 'Show header and footer', 'fluid-checkout' ),
 					'hideHeaderFooter'     => __( 'Hide header and footer', 'fluid-checkout' ),
 				),
@@ -355,34 +359,31 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 						</label>
 					</div>
 
-					<div class="fc-settings-sectioned-buttons fc-settings-preview__zoom" role="group" aria-label="<?php echo esc_attr( __( 'Preview zoom', 'fluid-checkout' ) ); ?>">
+					<div class="fc-settings-sectioned-buttons fc-settings-preview__width" role="group" aria-label="<?php echo esc_attr( __( 'Preview width', 'fluid-checkout' ) ); ?>">
 						<button
 							type="button"
-							class="fc-settings-sectioned-buttons__option fc-settings-preview__zoom-button"
-							data-fc-settings-preview-zoom-out
-							title="<?php echo esc_attr( __( 'Zoom out', 'fluid-checkout' ) ); ?>"
-							aria-label="<?php echo esc_attr( __( 'Zoom out', 'fluid-checkout' ) ); ?>"
+							class="fc-settings-sectioned-buttons__option fc-settings-preview__width-button"
+							data-fc-settings-preview-width-decrease
+							title="<?php echo esc_attr( __( 'Decrease width', 'fluid-checkout' ) ); ?>"
+							aria-label="<?php echo esc_attr( __( 'Decrease width', 'fluid-checkout' ) ); ?>"
 						>
 							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM13.5 10.5h-6"/>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15"/>
 							</svg>
 						</button>
+						<label class="fc-settings-preview__width-value" title="<?php echo esc_attr( __( 'Preview width in pixels', 'fluid-checkout' ) ); ?>">
+							<input type="text" inputmode="numeric" autocomplete="off" value="<?php echo esc_attr( self::VIEWPORT_WIDTHS[ 'desktop' ] ); ?>" data-fc-settings-preview-width aria-label="<?php echo esc_attr( __( 'Preview width in pixels', 'fluid-checkout' ) ); ?>">
+							<span aria-hidden="true">px</span>
+						</label>
 						<button
 							type="button"
-							class="fc-settings-sectioned-buttons__option fc-settings-preview__zoom-value"
-							data-fc-settings-preview-zoom-value
-							title="<?php echo esc_attr( __( 'Reset zoom', 'fluid-checkout' ) ); ?>"
-							aria-label="<?php echo esc_attr( __( 'Reset zoom to 100%', 'fluid-checkout' ) ); ?>"
-						>100%</button>
-						<button
-							type="button"
-							class="fc-settings-sectioned-buttons__option fc-settings-preview__zoom-button"
-							data-fc-settings-preview-zoom-in
-							title="<?php echo esc_attr( __( 'Zoom in', 'fluid-checkout' ) ); ?>"
-							aria-label="<?php echo esc_attr( __( 'Zoom in', 'fluid-checkout' ) ); ?>"
+							class="fc-settings-sectioned-buttons__option fc-settings-preview__width-button"
+							data-fc-settings-preview-width-increase
+							title="<?php echo esc_attr( __( 'Increase width', 'fluid-checkout' ) ); ?>"
+							aria-label="<?php echo esc_attr( __( 'Increase width', 'fluid-checkout' ) ); ?>"
 						>
 							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
 							</svg>
 						</button>
 					</div>
@@ -424,8 +425,9 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			</div>
 
 			<div class="fc-settings-preview__panel" data-fc-settings-preview-panel>
-				<div class="fc-settings-preview__frame-wrap" data-fc-settings-preview-frame-wrap data-viewport="desktop">
+				<div class="fc-settings-preview__frame-wrap" data-fc-settings-preview-frame-wrap>
 					<p class="fc-settings-preview__dims" data-fc-settings-preview-dims aria-live="polite">&mdash;</p>
+					<button type="button" class="fc-settings-preview__zoom-hint" data-fc-settings-preview-zoom-hint hidden><?php echo esc_html( __( 'Expand preview for a closer look', 'fluid-checkout' ) ); ?></button>
 					<iframe
 						class="fc-settings-preview__frame"
 						data-fc-settings-preview-frame

@@ -3,7 +3,7 @@
  * Expand/collapse, viewport size, page tabs, and visibility by settings tab.
  *
  * DEPENDS ON:
- * - FCUtils // Settings merge when available
+ * - FCUtils // Utility functions
  */
 
 (function ( root, factory ) {
@@ -22,7 +22,7 @@
 
 	var _hasInitialized = false;
 	var _publicMethods = {};
-	var _previewZoom = 100;
+	var _previewWidth = 0;
 	var _collapseTimer = null;
 	var _previewMode = 'guest';
 	var _isHeaderFooterVisible = false;
@@ -36,12 +36,13 @@
 		frameSelector:               '[data-fc-settings-preview-frame]',
 		dimsSelector:                '[data-fc-settings-preview-dims]',
 		pageTabSelector:             '[data-fc-settings-preview-page]',
-		zoomInSelector:              '[data-fc-settings-preview-zoom-in]',
-		zoomOutSelector:             '[data-fc-settings-preview-zoom-out]',
-		zoomValueSelector:           '[data-fc-settings-preview-zoom-value]',
+		widthDecreaseSelector:       '[data-fc-settings-preview-width-decrease]',
+		widthIncreaseSelector:       '[data-fc-settings-preview-width-increase]',
+		widthInputSelector:          '[data-fc-settings-preview-width]',
+		zoomHintSelector:            '[data-fc-settings-preview-zoom-hint]',
 		modeSelector:                '[data-fc-settings-preview-mode]',
 		headerFooterSelector:        '[data-fc-settings-preview-header-footer]',
-		viewportInputName:           'fc-settings-preview-viewport',
+		viewportInputSelector:       'input[name="fc-settings-preview-viewport"]',
 		hasPreviewClass:             'has-preview',
 		isExpandedClass:             'is-preview-expanded',
 		isEnterClass:                'is-preview-enter',
@@ -49,10 +50,11 @@
 		isActiveClass:               'is-active',
 		pageAttribute:               'data-fc-settings-preview-page',
 		urlAttribute:                'data-fc-settings-preview-url',
-		viewportAttribute:           'data-viewport',
-		zoomMin:                     50,
-		zoomMax:                     200,
-		zoomStep:                    25,
+		viewportWidths:              { mobile: 350, tablet: 750, desktop: 1000 },
+		widthMin:                    320,
+		widthMax:                    1920,
+		widthStep:                   100,
+		zoomHintThreshold:           0.6,
 		compactBreakpoint:           1280,
 		// Same as settings nav: title / menu bar is the full-width sticky section
 		navCompactBreakpoint:        980,
@@ -72,8 +74,6 @@
 			expand:                  'Expand preview',
 			collapse:                'Collapse preview',
 			showPreview:             'Preview',
-			zoomIn:                  'Zoom in',
-			zoomOut:                 'Zoom out',
 			showHeaderFooter:        'Show header and footer',
 			hideHeaderFooter:        'Hide header and footer',
 		},
@@ -88,38 +88,6 @@
 	 */
 
 
-
-	/**
-	 * Shallow-merge settings when `FCUtils` is not available.
-	 *
-	 * @param   {Object}  target  Base settings.
-	 * @param   {Object}  source  Overrides from PHP.
-	 * @return  {Object}          Merged settings.
-	 */
-	var extendSettings = function( target, source ) {
-		var merged = {};
-		var key;
-
-		if ( typeof FCUtils !== 'undefined' && typeof FCUtils.extendObject === 'function' ) {
-			return FCUtils.extendObject( target, source );
-		}
-
-		for ( key in target ) {
-			if ( Object.prototype.hasOwnProperty.call( target, key ) ) {
-				merged[ key ] = target[ key ];
-			}
-		}
-
-		if ( source && typeof source === 'object' ) {
-			for ( key in source ) {
-				if ( Object.prototype.hasOwnProperty.call( source, key ) ) {
-					merged[ key ] = source[ key ];
-				}
-			}
-		}
-
-		return merged;
-	};
 
 	/**
 	 * Get the settings layout element.
@@ -164,41 +132,6 @@
 		}
 
 		return _settings.defaultPage;
-	};
-
-	/**
-	 * Update the dimension label from the iframe layout viewport
-	 * (projected CSS px size — changes with zoom like browser Ctrl+/−).
-	 */
-	var updatePreviewDims = function() {
-		var frame = document.querySelector( _settings.frameSelector );
-		var dims = document.querySelector( _settings.dimsSelector );
-		var win;
-		var doc;
-		var width;
-		var height;
-
-		// Bail if frame or dims label is missing
-		if ( ! frame || ! dims ) { return; }
-
-		try {
-			win = frame.contentWindow;
-			doc = frame.contentDocument;
-		} catch ( err ) {
-			return;
-		}
-
-		// Bail if iframe document is not available
-		if ( ! win || ! doc || ! doc.documentElement ) { return; }
-
-		// Layout viewport inside the iframe (widens when zoomed out, narrows when zoomed in)
-		width = Math.round( win.innerWidth || doc.documentElement.clientWidth || 0 );
-		height = Math.round( win.innerHeight || doc.documentElement.clientHeight || 0 );
-
-		// Bail if viewport size is not available yet
-		if ( ! width || ! height ) { return; }
-
-		dims.textContent = width + ' \u00d7 ' + height;
 	};
 
 	/**
@@ -291,7 +224,6 @@
 		layout.classList.remove( _settings.isEnterClass );
 		_collapseTimer = null;
 		syncPreviewExpandedControls( false );
-		updatePreviewDims();
 	};
 
 	/**
@@ -331,14 +263,12 @@
 				window.requestAnimationFrame( function() {
 					window.requestAnimationFrame( function() {
 						layout.classList.remove( _settings.isEnterClass );
-						updatePreviewDims();
 					} );
 				} );
 			}
 			// Otherwise clear any leftover enter frame
 			else {
 				layout.classList.remove( _settings.isEnterClass );
-				updatePreviewDims();
 			}
 
 			return;
@@ -350,7 +280,6 @@
 			layout.classList.remove( _settings.isEnterClass );
 			layout.classList.remove( _settings.isCollapsingClass );
 			syncPreviewExpandedControls( false );
-			updatePreviewDims();
 			return;
 		}
 
@@ -363,136 +292,93 @@
 	};
 
 	/**
-	 * Set the preview viewport size.
-	 *
-	 * @param  {string}  viewport  Viewport slug (`mobile`, `tablet`, or `desktop`).
+	 * Apply the page preview width to the frame, scaled down to the available width and filling the available height.
 	 */
-	var setPreviewViewport = function( viewport ) {
+	var applyPreviewSize = function() {
+		var panel = document.querySelector( _settings.panelSelector );
 		var frameWrap = document.querySelector( _settings.frameWrapSelector );
-
-		// Bail if frame wrap is missing
-		if ( ! frameWrap ) { return; }
-
-		frameWrap.setAttribute( _settings.viewportAttribute, viewport || 'desktop' );
-
-		// Re-apply zoom so the layout viewport matches the new visual frame size
-		applyPreviewZoom();
-		updatePreviewDims();
-	};
-
-	/**
-	 * Clamp a zoom percentage to the allowed range.
-	 *
-	 * @param   {number}  percent  Requested zoom percentage.
-	 * @return  {number}
-	 */
-	var clampPreviewZoom = function( percent ) {
-		var min = parseInt( _settings.zoomMin, 10 ) || 50;
-		var max = parseInt( _settings.zoomMax, 10 ) || 200;
-		var value = parseInt( percent, 10 );
-
-		if ( isNaN( value ) ) {
-			value = 100;
-		}
-
-		if ( value < min ) { return min; }
-		if ( value > max ) { return max; }
-		return value;
-	};
-
-	/**
-	 * Clear inline zoom sizing/transform from the preview iframe.
-	 *
-	 * @param  {Element}  frame  Preview iframe element.
-	 */
-	var clearPreviewZoomStyles = function( frame ) {
-		frame.style.position = '';
-		frame.style.top = '';
-		frame.style.left = '';
-		frame.style.width = '';
-		frame.style.height = '';
-		frame.style.transform = '';
-		frame.style.transformOrigin = '';
-	};
-
-	/**
-	 * Apply zoom like browser Ctrl+/−: keep the visual frame size, expand/shrink
-	 * the iframe layout viewport, then scale so it fits. Dims then measure the
-	 * projected CSS px size inside the iframe.
-	 */
-	var applyPreviewZoom = function() {
 		var frame = document.querySelector( _settings.frameSelector );
-		var frameWrap = document.querySelector( _settings.frameWrapSelector );
-		var doc;
-		var zoom;
-		var visualWidth;
-		var visualHeight;
+		var dims = document.querySelector( _settings.dimsSelector );
+		var zoomHint = document.querySelector( _settings.zoomHintSelector );
+		var layout = getLayout();
+		var panelStyle;
+		var borderWidth;
+		var availableWidth;
+		var availableHeight;
+		var scale;
+		var frameHeight;
 
-		// Bail if frame or wrap is missing
-		if ( ! frame || ! frameWrap ) { return; }
+		// Bail if the panel, frame wrap or frame is missing
+		if ( ! panel || ! frameWrap || ! frame ) { return; }
 
-		// Remove document-level zoom if a previous build set it
-		try {
-			doc = frame.contentDocument;
-			if ( doc && doc.documentElement ) {
-				doc.documentElement.style.zoom = '';
-			}
-		} catch ( err ) {
-			// Ignore cross-origin access errors
+		// Get the space available for the page preview, inside the panel padding and the frame border
+		panelStyle = window.getComputedStyle( panel );
+		borderWidth = frameWrap.offsetWidth - frameWrap.clientWidth;
+		availableWidth = panel.clientWidth - parseFloat( panelStyle.paddingLeft ) - parseFloat( panelStyle.paddingRight ) - borderWidth;
+		availableHeight = frameWrap.clientHeight;
+
+		// Bail if the available space is not known, such as while the preview is hidden
+		if ( availableWidth <= 0 || availableHeight <= 0 ) { return; }
+
+		// Scale the page preview down to the available width, never up, and fill the available height
+		scale = Math.min( 1, availableWidth / _previewWidth );
+		frameHeight = Math.round( availableHeight / scale );
+
+		// Size the frame to the scaled page preview, and lay the page out at the preview width
+		frameWrap.style.maxWidth = ( _previewWidth * scale + borderWidth ) + 'px';
+		frame.style.width = _previewWidth + 'px';
+		frame.style.height = frameHeight + 'px';
+		frame.style.transform = 1 === scale ? '' : 'scale( ' + scale + ' )';
+
+		// Maybe show the size and zoom of the page preview
+		if ( dims ) {
+			dims.textContent = _previewWidth + ' \u00d7 ' + frameHeight + ' \u00b7 ' + Math.round( scale * 100 ) + '%';
 		}
 
-		zoom = _previewZoom / 100;
-
-		// At 100%, use normal flex-filled iframe sizing
-		if ( 1 === zoom ) {
-			clearPreviewZoomStyles( frame );
-			return;
+		// Maybe suggest expanding the preview when it is zoomed out a lot, unless already expanded or in the compact layout drawer
+		if ( zoomHint ) {
+			zoomHint.hidden = scale >= _settings.zoomHintThreshold || isCompactPreviewLayout() || ( layout && layout.classList.contains( _settings.isExpandedClass ) );
 		}
-
-		visualWidth = frameWrap.clientWidth;
-		visualHeight = frameWrap.clientHeight;
-
-		// Bail if the visual frame size is not available yet
-		if ( ! visualWidth || ! visualHeight ) { return; }
-
-		// Larger layout viewport when zoomed out; smaller when zoomed in
-		frame.style.position = 'absolute';
-		frame.style.top = '0';
-		frame.style.left = '0';
-		frame.style.width = ( visualWidth / zoom ) + 'px';
-		frame.style.height = ( visualHeight / zoom ) + 'px';
-		frame.style.transformOrigin = 'top left';
-		frame.style.transform = 'scale( ' + zoom + ' )';
 	};
 
 	/**
-	 * Update zoom control UI and apply zoom to the preview iframe.
+	 * Set the width the page preview lays out at, and fit it in the frame.
 	 *
-	 * @param  {number}  percent  Zoom percentage to apply.
+	 * @param  {number|string}  width  Page preview width in pixels.
 	 */
-	var setPreviewZoom = function( percent ) {
-		var valueEl = document.querySelector( _settings.zoomValueSelector );
-		var zoomInButton = document.querySelector( _settings.zoomInSelector );
-		var zoomOutButton = document.querySelector( _settings.zoomOutSelector );
-		var min = parseInt( _settings.zoomMin, 10 ) || 50;
-		var max = parseInt( _settings.zoomMax, 10 ) || 200;
+	var setPreviewWidth = function( width ) {
+		var widthInput = document.querySelector( _settings.widthInputSelector );
+		var decreaseButton = document.querySelector( _settings.widthDecreaseSelector );
+		var increaseButton = document.querySelector( _settings.widthIncreaseSelector );
+		var viewportInputs = document.querySelectorAll( _settings.viewportInputSelector );
+		var newWidth = parseInt( width, 10 );
+		var i;
 
-		_previewZoom = clampPreviewZoom( percent );
+		// Keep the current width for values that are not numbers, otherwise limit the width to the allowed range
+		_previewWidth = isNaN( newWidth ) ? _previewWidth : Math.min( _settings.widthMax, Math.max( _settings.widthMin, newWidth ) );
 
-		if ( valueEl ) {
-			valueEl.textContent = _previewZoom + '%';
+		// Maybe update the width field
+		if ( widthInput ) {
+			widthInput.value = _previewWidth;
 		}
 
-		if ( zoomOutButton ) {
-			zoomOutButton.disabled = _previewZoom <= min;
+		// Maybe disable the decrease button at the minimum width
+		if ( decreaseButton ) {
+			decreaseButton.disabled = _previewWidth <= _settings.widthMin;
 		}
 
-		if ( zoomInButton ) {
-			zoomInButton.disabled = _previewZoom >= max;
+		// Maybe disable the increase button at the maximum width
+		if ( increaseButton ) {
+			increaseButton.disabled = _previewWidth >= _settings.widthMax;
 		}
 
-		applyPreviewZoom();
-		updatePreviewDims();
+		// Iterate viewport buttons, selecting only the one with the same width, so each one can set its width again
+		for ( i = 0; i < viewportInputs.length; i++ ) {
+			viewportInputs[ i ].checked = _settings.viewportWidths[ viewportInputs[ i ].value ] === _previewWidth;
+		}
+
+		// Fit the page preview in the frame at the new width
+		applyPreviewSize();
 	};
 
 	/**
@@ -581,8 +467,6 @@
 		}
 
 		setPreviewFrameSource( page, url );
-		applyPreviewZoom();
-		updatePreviewDims();
 	};
 
 	/**
@@ -784,7 +668,6 @@
 	var handleCompactBreakpointChange = function() {
 		setPreviewExpanded( false );
 		syncPreviewDrawerPosition();
-		updatePreviewDims();
 	};
 
 	/**
@@ -796,37 +679,68 @@
 		var input = e.target;
 
 		// Bail if the change is not for a viewport radio
-		if ( ! input || _settings.viewportInputName !== input.name || ! input.checked ) { return; }
+		if ( ! input || ! input.matches( _settings.viewportInputSelector ) || ! input.checked ) { return; }
 
-		setPreviewViewport( input.value );
+		// Set the width of the selected viewport button
+		setPreviewWidth( _settings.viewportWidths[ input.value ] );
 	};
 
 	/**
-	 * Handle zoom in/out/reset control clicks.
+	 * Handle width button clicks.
 	 *
 	 * @param  {Event}  e  Click event.
 	 */
-	var handleZoomClick = function( e ) {
-		var zoomInButton = e.target.closest( _settings.zoomInSelector );
-		var zoomOutButton = e.target.closest( _settings.zoomOutSelector );
-		var zoomValueButton = e.target.closest( _settings.zoomValueSelector );
-		var step = parseInt( _settings.zoomStep, 10 ) || 25;
+	var handleWidthClick = function( e ) {
+		var decreaseButton = e.target.closest( _settings.widthDecreaseSelector );
+		var increaseButton = e.target.closest( _settings.widthIncreaseSelector );
 
-		// Bail if click was not on a zoom control
-		if ( ! zoomInButton && ! zoomOutButton && ! zoomValueButton ) { return; }
+		// Bail if click was not on a width button
+		if ( ! decreaseButton && ! increaseButton ) { return; }
 
-		if ( zoomValueButton ) {
-			setPreviewZoom( 100 );
-		}
-		// Otherwise maybe zoom in
-		else if ( zoomInButton && ! zoomInButton.disabled ) {
-			setPreviewZoom( _previewZoom + step );
-		}
-		// Otherwise maybe zoom out
-		else if ( zoomOutButton && ! zoomOutButton.disabled ) {
-			setPreviewZoom( _previewZoom - step );
-		}
+		// Change the width by one step
+		setPreviewWidth( _previewWidth + ( increaseButton ? _settings.widthStep : -_settings.widthStep ) );
+		e.preventDefault();
+	};
 
+	/**
+	 * Handle width field changes.
+	 *
+	 * @param  {Event}  e  Change event.
+	 */
+	var handleWidthChange = function( e ) {
+		// Bail if the change is not for the width field
+		if ( ! e.target.matches( _settings.widthInputSelector ) ) { return; }
+
+		// Set the typed width
+		setPreviewWidth( e.target.value );
+	};
+
+	/**
+	 * Handle key down events in the width field.
+	 *
+	 * @param  {Event}  e  Key down event.
+	 */
+	var handleWidthKeyDown = function( e ) {
+		// Bail if not the enter key in the width field
+		if ( FCUtils.keyboardKeys.ENTER !== e.key || ! e.target.matches( _settings.widthInputSelector ) ) { return; }
+
+		// Apply the width instead of submitting the settings form
+		setPreviewWidth( e.target.value );
+		e.preventDefault();
+	};
+
+	/**
+	 * Handle zoom hint clicks.
+	 *
+	 * @param  {Event}  e  Click event.
+	 */
+	var handleZoomHintClick = function( e ) {
+		// Bail if click was not on the zoom hint
+		if ( ! e.target.closest( _settings.zoomHintSelector ) ) { return; }
+
+		// Expand the preview, remembered in the browser like with the expand button
+		setPreviewExpanded( true );
+		saveState( 'expanded', true );
 		e.preventDefault();
 	};
 
@@ -923,7 +837,7 @@
 	var init = function( options ) {
 		var preview;
 		var expandButton;
-		var frame;
+		var panel;
 		var breakpoint;
 		var navCompactBreakpoint;
 		var savedState;
@@ -932,7 +846,7 @@
 		if ( _hasInitialized ) { return; }
 
 		// Merge settings
-		_settings = extendSettings( _settings, options );
+		_settings = FCUtils.extendObject( _settings, options );
 
 		preview = getPreview();
 
@@ -969,7 +883,10 @@
 		document.addEventListener( 'click', handleToggleClick, true );
 		document.addEventListener( 'change', handleViewportChange, true );
 		document.addEventListener( 'click', handlePageTabClick, true );
-		document.addEventListener( 'click', handleZoomClick, true );
+		document.addEventListener( 'click', handleWidthClick, true );
+		document.addEventListener( 'change', handleWidthChange, true );
+		document.addEventListener( 'keydown', handleWidthKeyDown, true );
+		document.addEventListener( 'click', handleZoomHintClick, true );
 		document.addEventListener( 'change', handleModeChange, true );
 		document.addEventListener( 'click', handleHeaderFooterClick, true );
 		window.addEventListener( 'message', handleMessage );
@@ -978,28 +895,10 @@
 		window.addEventListener( 'scroll', syncPreviewDrawerPosition, true );
 		window.addEventListener( 'resize', syncPreviewDrawerPosition );
 
-		frame = document.querySelector( _settings.frameSelector );
-		if ( frame ) {
-			frame.addEventListener( 'load', function() {
-				applyPreviewZoom();
-				updatePreviewDims();
-			} );
-		}
-
-		var frameWrap = document.querySelector( _settings.frameWrapSelector );
-		if ( frameWrap && typeof ResizeObserver !== 'undefined' ) {
-			var previewResizeObserver = new ResizeObserver( function() {
-				applyPreviewZoom();
-				updatePreviewDims();
-			} );
-			previewResizeObserver.observe( frameWrap );
-		}
-		// Otherwise re-apply zoom and dims on window resize
-		else {
-			window.addEventListener( 'resize', function() {
-				applyPreviewZoom();
-				updatePreviewDims();
-			} );
+		// Maybe fit the page preview in the frame when the panel size changes, such as when expanding the preview
+		panel = document.querySelector( _settings.panelSelector );
+		if ( panel && window.ResizeObserver ) {
+			new ResizeObserver( applyPreviewSize ).observe( panel );
 		}
 
 		// Restore the preview mode and header and footer visibility saved in the browser
@@ -1007,8 +906,8 @@
 		setPreviewMode( savedState.mode || _settings.guestMode );
 		setHeaderFooterVisible( true === savedState.headerFooter );
 
-		// Sync from the initial settings tab and zoom UI
-		setPreviewZoom( _previewZoom );
+		// Sync from the initial settings tab, with the desktop page preview width
+		setPreviewWidth( _settings.viewportWidths.desktop );
 		syncFromSettingsTab( _settings.initialTab );
 
 		// Start with the compact drawer closed
