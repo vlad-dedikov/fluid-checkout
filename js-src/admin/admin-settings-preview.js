@@ -26,6 +26,11 @@
 	var _collapseTimer = null;
 	var _previewMode = 'guest';
 	var _isHeaderFooterVisible = false;
+	var _cssVariables = {};
+	var _colorScheme = '';
+	var _bodyClasses = {};
+	var _computedCssValueRequests = {};
+	var _computedCssValueRequestId = 0;
 	var _settings = {
 		layoutSelector:              '[data-fc-settings-layout]',
 		previewSelector:             '[data-fc-settings-preview]',
@@ -602,6 +607,42 @@
 		frame.contentWindow.postMessage( message, origin );
 	};
 
+	/**
+	 * Send the preview state to the page preview, as each reload resets it.
+	 */
+	var sendPreviewState = function() {
+		var requestId;
+
+		// Send the header and footer visibility, read-only fields and styles
+		postMessageToPreview( { type: 'setHeaderFooterVisibility', visible: _isHeaderFooterVisible } );
+		postMessageToPreview( { type: 'setReadOnlyFields', readOnly: 'yes' === _settings.readOnlyFields } );
+		postMessageToPreview( { type: 'setColorScheme', scheme: _colorScheme } );
+		postMessageToPreview( { type: 'setCssVariables', variables: _cssVariables } );
+		postMessageToPreview( { type: 'setBodyClasses', classes: _bodyClasses } );
+
+		// Iterate pending computed value requests, sent again as a reload drops them
+		for ( requestId in _computedCssValueRequests ) {
+			postMessageToPreview( { type: 'getComputedCssValue', requestId: requestId, property: _computedCssValueRequests[ requestId ].property, value: _computedCssValueRequests[ requestId ].value } );
+		}
+	};
+
+	/**
+	 * Resolve a computed value request with the value sent by the page preview.
+	 *
+	 * @param  {number|string}  requestId  Request ID.
+	 * @param  {string}         value      Computed value.
+	 */
+	var resolveComputedCssValueRequest = function( requestId, value ) {
+		var request = _computedCssValueRequests[ requestId ];
+
+		// Bail if the request is already resolved
+		if ( ! request ) { return; }
+
+		// Resolve the request with the computed value
+		delete _computedCssValueRequests[ requestId ];
+		request.resolve( value );
+	};
+
 
 
 	/**
@@ -857,8 +898,11 @@
 
 		// READY
 		if ( 'ready' === e.data.type ) {
-			postMessageToPreview( { type: 'setHeaderFooterVisibility', visible: _isHeaderFooterVisible } );
-			postMessageToPreview( { type: 'setReadOnlyFields', readOnly: 'yes' === _settings.readOnlyFields } );
+			sendPreviewState();
+		}
+		// COMPUTED CSS VALUE
+		else if ( 'computedCssValue' === e.data.type ) {
+			resolveComputedCssValueRequest( e.data.requestId, e.data.value );
 		}
 	};
 
@@ -875,6 +919,69 @@
 
 		syncFromSettingsTab( tab );
 	};
+
+
+
+	/**
+	 * Set CSS variables in the page preview, replacing the ones set before, as a map of selectors to CSS variable names and values like the `fc_css_variables` filter.
+	 *
+	 * @param  {Object}  variables  CSS variables by selector.
+	 */
+	_publicMethods.setCssVariables = function( variables ) {
+		_cssVariables = variables;
+
+		// Send the CSS variables to the page preview
+		postMessageToPreview( { type: 'setCssVariables', variables: _cssVariables } );
+	};
+
+	/**
+	 * Force the color scheme of the page preview, such as to show the token set being edited.
+	 *
+	 * @param  {string}  scheme  `light` or `dark`, or an empty string to keep the color scheme of the page.
+	 */
+	_publicMethods.setColorScheme = function( scheme ) {
+		_colorScheme = scheme;
+
+		// Send the color scheme to the page preview
+		postMessageToPreview( { type: 'setColorScheme', scheme: _colorScheme } );
+	};
+
+	/**
+	 * Add or remove body classes of the page preview, keeping the classes set before.
+	 *
+	 * @param  {Object}  classes  Whether each class is added, by class name.
+	 */
+	_publicMethods.setBodyClasses = function( classes ) {
+		_bodyClasses = FCUtils.extendObject( _bodyClasses, classes );
+
+		// Send the classes to the page preview
+		postMessageToPreview( { type: 'setBodyClasses', classes: classes } );
+	};
+
+	/**
+	 * Get the computed value of a CSS property value in the page preview, such as a font size in pixels.
+	 * The page preview computes it, as the admin page cannot read the page preview when it is on another domain.
+	 *
+	 * @param   {string}   property  CSS property name.
+	 * @param   {string}   value     CSS property value.
+	 * @return  {Promise}            Promise resolving to the computed value, or an empty string when the value is not valid for the property or the iframe shows a placeholder.
+	 */
+	_publicMethods.getComputedCssValue = function( property, value ) {
+		return new Promise( function( resolve ) {
+			// Maybe ask the page preview, which sends the computed value back
+			if ( getPreviewOrigin() ) {
+				_computedCssValueRequestId++;
+				_computedCssValueRequests[ _computedCssValueRequestId ] = { property: property, value: value, resolve: resolve };
+				postMessageToPreview( { type: 'getComputedCssValue', requestId: _computedCssValueRequestId, property: property, value: value } );
+			}
+			// Otherwise resolve without a value, as the iframe shows a placeholder
+			else {
+				resolve( '' );
+			}
+		} );
+	};
+
+
 
 
 

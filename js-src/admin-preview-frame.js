@@ -27,16 +27,25 @@
 		tokenQueryArg:                'fc_preview',
 		previewArgs:                  {},
 		messageSource:                'fc-admin-preview',
+		darkModeCssVariables:         {},
 
 		hideHeaderFooterClass:        'fc-admin-preview--hide-header-footer',
+		darkModeClass:                'has-fc-dark-mode',
+
+		stylesId:                     'fc-admin-preview-styles',
+		probeId:                      'fc-admin-preview-probe',
 
 		inertActionSelector:          '#place_order, .fc-place-order-button, .fc-place-order__custom-buttons, .fc-express-checkout, .add_to_cart_button, .single_add_to_cart_button, .wc-block-components-product-button__button',
 		linkSelector:                 'a[href], area[href]',
 		scriptLinkSelector:           '.woocommerce-terms-and-conditions-link',
 		readOnlyFieldSelector:        '.form-row input:not([type="checkbox"]):not([type="radio"]), .form-row textarea, .quantity input',
 		readOnlyControlSelector:      '.form-row select, .form-row .ts-wrapper, .form-row .select2-container, .quantity button, .quantity input[type="button"]',
+		colorSchemeSelector:          ':root',
 	};
 	var _isReadOnlyFields = true;
+	var _cssVariables = {};
+	var _colorScheme = '';
+	var _hasDarkModeClass = false;
 
 
 
@@ -106,6 +115,150 @@
 
 		// Send ready message to the admin page
 		root.parent.postMessage( { source: _settings.messageSource, type: 'ready' }, _settings.adminOrigin );
+	};
+
+
+
+	/**
+	 * Add CSS variables to a style sheet, as a map of selectors to CSS variable names and values.
+	 * Rules and values are added through the CSS object model, so values cannot add other rules.
+	 *
+	 * @param {CSSStyleSheet}  sheet      Style sheet.
+	 * @param {Object}         variables  CSS variables by selector.
+	 */
+	var addCssVariablesRules = function( sheet, variables ) {
+		var selector;
+		var name;
+		var rule;
+
+		// Iterate selectors
+		for ( selector in variables ) {
+			// Add an empty rule for the selector
+			try {
+				rule = sheet.cssRules[ sheet.insertRule( selector + '{}', sheet.cssRules.length ) ];
+			}
+			// Skip selectors that are not valid, such as selectors the browser does not support
+			catch ( error ) {
+				continue;
+			}
+
+			// Iterate CSS variables of the selector
+			for ( name in variables[ selector ] ) {
+				// Skip properties other than CSS variables
+				if ( 0 !== name.indexOf( '--' ) ) { continue; }
+
+				// Set the CSS variable, which the CSS object model ignores when the value is not valid
+				rule.style.setProperty( name, variables[ selector ][ name ] );
+			}
+		}
+	};
+
+	/**
+	 * Get the CSS variables that force the color scheme: the dark mode values for the dark scheme, or no value for the light scheme so the default colors apply.
+	 *
+	 * @return {Object}  CSS variables by selector.
+	 */
+	var getColorSchemeCssVariables = function() {
+		var variables = {};
+		var name;
+
+		// Bail if the color scheme is not forced
+		if ( 'light' !== _colorScheme && 'dark' !== _colorScheme ) { return variables; }
+
+		variables[ _settings.colorSchemeSelector ] = {};
+
+		// Iterate dark mode CSS variables
+		for ( name in _settings.darkModeCssVariables ) {
+			variables[ _settings.colorSchemeSelector ][ name ] = 'dark' === _colorScheme ? _settings.darkModeCssVariables[ name ] : 'initial';
+		}
+
+		return variables;
+	};
+
+	/**
+	 * Update the preview styles with the CSS variables of the color scheme, then the CSS variables set by the admin page, which override them.
+	 */
+	var updatePreviewStyles = function() {
+		var styleElement = document.getElementById( _settings.stylesId );
+
+		// Maybe add the style element at the end of the body, so its rules come after the page styles
+		if ( ! styleElement ) {
+			styleElement = document.createElement( 'style' );
+			styleElement.id = _settings.stylesId;
+			document.body.appendChild( styleElement );
+		}
+
+		// Remove the previous rules
+		while ( styleElement.sheet.cssRules.length ) {
+			styleElement.sheet.deleteRule( 0 );
+		}
+
+		// Add the CSS variables
+		addCssVariablesRules( styleElement.sheet, getColorSchemeCssVariables() );
+		addCssVariablesRules( styleElement.sheet, _cssVariables );
+	};
+
+	/**
+	 * Force the color scheme of the page preview, or keep the color scheme of the page.
+	 *
+	 * @param {string}  scheme  `light` or `dark`, or any other value to keep the color scheme of the page.
+	 */
+	var setColorScheme = function( scheme ) {
+		_colorScheme = scheme;
+
+		// Add or remove the dark mode class, as some styles also depend on it
+		document.body.classList.toggle( _settings.darkModeClass, 'dark' === scheme || ( 'light' !== scheme && _hasDarkModeClass ) );
+
+		// Update the CSS variables of the color scheme
+		updatePreviewStyles();
+	};
+
+	/**
+	 * Add or remove body classes of the page preview.
+	 *
+	 * @param {Object}  classes  Whether each class is added, by class name.
+	 */
+	var setBodyClasses = function( classes ) {
+		var className;
+
+		// Iterate classes
+		for ( className in classes ) {
+			document.body.classList.toggle( className, true === classes[ className ] );
+		}
+	};
+
+	/**
+	 * Send the computed value of a CSS property value in the page preview to the admin page, such as a font size in pixels.
+	 * Values are computed on a hidden text field, which gets the theme styles for text fields.
+	 *
+	 * @param {number|string}  requestId  Request ID from the admin page, sent back with the value.
+	 * @param {string}         property   CSS property name.
+	 * @param {string}         value      CSS property value.
+	 */
+	var sendComputedCssValue = function( requestId, property, value ) {
+		var probe = document.getElementById( _settings.probeId );
+		var computedValue = '';
+
+		// Maybe add the hidden text field
+		if ( ! probe ) {
+			probe = document.createElement( 'input' );
+			probe.type = 'text';
+			probe.id = _settings.probeId;
+			probe.hidden = true;
+			document.body.appendChild( probe );
+		}
+
+		// Set the value on the hidden text field, then remove it once computed
+		probe.style.setProperty( property, value );
+
+		// Maybe get the computed value, unless the value is not valid for the property
+		if ( probe.style.getPropertyValue( property ) ) {
+			computedValue = root.getComputedStyle( probe ).getPropertyValue( property );
+		}
+		probe.style.removeProperty( property );
+
+		// Send the computed value to the admin page
+		root.parent.postMessage( { source: _settings.messageSource, type: 'computedCssValue', requestId: requestId, value: computedValue }, _settings.adminOrigin );
 	};
 
 
@@ -220,6 +373,23 @@
 		else if ( 'setReadOnlyFields' === e.data.type ) {
 			_isReadOnlyFields = false !== e.data.readOnly;
 		}
+		// SET CSS VARIABLES
+		else if ( 'setCssVariables' === e.data.type ) {
+			_cssVariables = e.data.variables;
+			updatePreviewStyles();
+		}
+		// SET COLOR SCHEME
+		else if ( 'setColorScheme' === e.data.type ) {
+			setColorScheme( e.data.scheme );
+		}
+		// SET BODY CLASSES
+		else if ( 'setBodyClasses' === e.data.type ) {
+			setBodyClasses( e.data.classes );
+		}
+		// GET COMPUTED CSS VALUE
+		else if ( 'getComputedCssValue' === e.data.type ) {
+			sendComputedCssValue( e.data.requestId, e.data.property, e.data.value );
+		}
 	};
 
 
@@ -240,6 +410,9 @@
 
 		// Stop scripts from opening other windows
 		root.open = preventWindowOpen;
+
+		// Keep the dark mode class of the page, to restore it when the color scheme is no longer forced
+		_hasDarkModeClass = document.body.classList.contains( _settings.darkModeClass );
 
 		// Add event listeners
 		window.addEventListener( 'click', handleClick, true );

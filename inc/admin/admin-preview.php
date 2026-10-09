@@ -481,9 +481,10 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		 * Filter the settings of the admin preview frame script, for example to make more payment buttons inert.
 		 */
 		return apply_filters( 'fc_admin_preview_frame_script_settings', array(
-			'adminOrigin'         => $this->get_admin_origin(),
-			'tokenQueryArg'       => self::TOKEN_QUERY_ARG,
-			'previewArgs'         => $this->get_preview_args(),
+			'adminOrigin'            => $this->get_admin_origin(),
+			'tokenQueryArg'          => self::TOKEN_QUERY_ARG,
+			'previewArgs'            => $this->get_preview_args(),
+			'darkModeCssVariables'   => FluidCheckout_DesignTemplates::instance()->get_css_variables_dark_mode(),
 		) );
 	}
 
