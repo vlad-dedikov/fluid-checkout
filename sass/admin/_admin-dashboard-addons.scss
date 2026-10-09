@@ -2,6 +2,12 @@
 // DASHBOARD ADDONS
 // ------------------------------------
 
+.fc-settings-card--addons {
+	border: solid 2px #646970;
+}
+
+
+
 .fc-addons-list {
 	display: flex;
 	flex-wrap: wrap;
@@ -34,6 +40,15 @@
 	}
 }
 
+.fc-addons__item.fc-addons__item--bundle,
+.fc-addons__item.fc-addons__item--highlight,
+.fc-addons__item.fc-addons__item--highlight-conversion,
+.fc-addons__item.fc-addons__item--wide {
+	@media ( min-width: 600px ) {
+		width: 100%;
+	}
+}
+
 .fc-addons__item.fc-addons__item--bundle {
 	border: solid 2px #1E212B;
 }
@@ -44,12 +59,6 @@
 
 .fc-addons__item.fc-addons__item--highlight-conversion {
 	border: solid 2px #0B7A6F;
-}
-
-.fc-addons__item.fc-addons__item--wide {
-	@media ( min-width: 600px ) {
-		width: 100%;
-	}
 }
 
 
@@ -74,7 +83,6 @@
 	justify-content: flex-start;
 	flex-wrap: nowrap;
 	gap: 20px;
-	margin-bottom: 20px;
 }
 
 
@@ -163,6 +171,7 @@
 
 .fc-addons__item-description {
 	flex-grow: 1;
+	margin-top: 20px;
 }
 
 .fc-addons__item-description > *:first-child {
@@ -313,14 +322,9 @@
 
 
 
-.fc-addons__item-title .fc-settings-badge {
-	margin-right: 0;
-	margin-left: 6px;
-}
-
-.rtl .fc-addons__item-title .fc-settings-badge {
-	margin-right: 6px;
-	margin-left: 0;
+.fc-addons__item-title-section > .fc-settings-badge {
+	display: inline-block;
+	margin: 0 0 6px;
 }
 
 
@@ -332,19 +336,34 @@
 .fc-addons__item-actions--marketing {
 	display: flex;
 	flex-wrap: wrap;
-	align-items: center;
+	align-items: stretch;
 	gap: 10px;
 }
 
+// Two action buttons share the row evenly; a single button fills the width
 .fc-addons__item-actions--marketing .button,
 .fc-addons__item-actions--marketing .fc-settings-button {
+	flex: 1 1 0;
+	box-sizing: border-box;
 	width: auto;
 	max-width: none;
+	min-width: 0;
+	text-align: center;
 	white-space: nowrap;
+}
+
+// License select and notices span the full row below / above the button pair
+.fc-addons__item-actions--marketing .fc-addons__item-license-select,
+.fc-addons__item-actions--marketing .fc-addons__item-action-notice {
+	flex: 1 0 100%;
+	width: 100%;
 }
 
 .fc-addons__item-actions--marketing .button + .button,
 .fc-addons__item-actions--marketing .button + .fc-settings-button,
-.fc-addons__item-actions--marketing .fc-settings-button + .button {
+.fc-addons__item-actions--marketing .button + .fc-addons__item-action-notice,
+.fc-addons__item-actions--marketing .fc-settings-button + .button,
+.fc-addons__item-actions--marketing .fc-addons__item-license-select + .button,
+.fc-addons__item-actions--marketing .fc-addons__item-action-notice {
 	margin-top: 0;
 }

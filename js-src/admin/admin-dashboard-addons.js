@@ -38,7 +38,7 @@
 		i18n: {
 			processing:                       'Processing…',
 			genericError:                     'Something went wrong. Please try again.',
-			activate:                         'Activate plugin',
+			activate:                         'Activate add-on',
 		},
 	};
 
@@ -67,7 +67,7 @@
 	 * @return {string} Activate button label.
 	 */
 	var getActivateLabel = function() {
-		return _settings.i18n && _settings.i18n.activate ? _settings.i18n.activate : 'Activate plugin';
+		return _settings.i18n && _settings.i18n.activate ? _settings.i18n.activate : 'Activate add-on';
 	};
 
 
@@ -213,6 +213,9 @@
 		var body;
 
 		e.preventDefault();
+
+		// Bail if the control is disabled (e.g. add-on installed while PRO is inactive)
+		if ( button.disabled || button.classList.contains( 'disabled' ) ) { return; }
 
 		// Bail if AJAX not configured
 		if ( ! plugin || ! _settings.ajaxUrl || ! _settings.activateNonce ) { return; }

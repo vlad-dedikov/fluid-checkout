@@ -57,7 +57,16 @@ class FluidCheckout_Admin extends FluidCheckout {
 	public function register_assets() {
 		// Scripts
 		wp_register_script( 'fc-settings-page', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin/fc-settings-page' ), array(), NULL, array( 'in_footer' => true, 'strategy' => 'defer' ) );
-		wp_add_inline_script( 'fc-settings-page', 'window.addEventListener("load",function(){FCSettingsPage.init();});' );
+		wp_localize_script(
+			'fc-settings-page',
+			'fcSettingsPageSettings',
+			array(
+				'i18n' => array(
+					'saving' => __( 'Saving...', 'fluid-checkout' ),
+				),
+			)
+		);
+		wp_add_inline_script( 'fc-settings-page', '(function(){var i=function(){FCSettingsPage.init(window.fcSettingsPageSettings||{});};if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",i);}else{i();}})();' );
 
 		// Styles
 		wp_register_style( 'fc-admin-options', FluidCheckout_Enqueue::instance()->get_style_url( 'css/admin-options' ), array(), NULL );
@@ -138,7 +147,6 @@ class FluidCheckout_Admin extends FluidCheckout {
 	public function load_dashboard() {
 		include_once self::$directory_path . 'inc/admin/admin-dashboard-actions.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-setup.php';
-		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-site-key.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-addons.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-plugins-catalog.php';
 	}
@@ -154,7 +162,6 @@ class FluidCheckout_Admin extends FluidCheckout {
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-input.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-select.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-multiselect.php';
-		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-checkboxgroup.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-telemetry.php';
 		include_once self::$directory_path . 'inc/admin/admin-telemetry.php';
 		include_once self::$directory_path . 'inc/admin/admin-setting-type-fc-textarea.php';
@@ -244,27 +251,6 @@ class FluidCheckout_Admin extends FluidCheckout {
 
 
 	/**
-	 * Get HTML for "upgrade to PRO" to be used on settings descriptions.
-	 * 
-	 * @param  bool  $newline  Whether to add a new line before.
-	 */
-	public function get_upgrade_pro_html( $newline = true ) {
-		// Bail if PRO is already activated
-		if ( FluidCheckout::instance()->is_pro_activated() ) { return ''; }
-
-		// Get HTML for the upgrade link
-		// translators: %s: Upgrade link.
-		$html = wp_kses_post( sprintf( __( '<a target="_blank" href="%s">Upgrade to PRO</a> to unlock more options.', 'fluid-checkout' ), 'https://fluidcheckout.com/pricing/?mtm_campaign=upgrade-pro&mtm_kwd=plugin-settings&mtm_source=lite-plugin' ) );
-
-		// Maybe add line break
-		if ( $newline ) {
-			$html = ' <br>' . $html;
-		}
-
-		return $html;
-	}
-
-	/**
 	 * Get HTML for the PRO feature promo pill badge.
 	 *
 	 * @param  string       $section_slug  Section slug used in tracking as `mtm_kwd=pro-badge-{slug}`.
@@ -295,11 +281,11 @@ class FluidCheckout_Admin extends FluidCheckout {
 	}
 
 	/**
-	 * Get HTML for the add-on feature promo pill badge.
-	 * Also includes a short "PRO" badge next to the add-on badge when PRO is not active.
+	 * Get HTML for the PRO feature promo pill on add-on settings sections.
+	 * Returns empty when the add-on feature is already unlocked.
 	 *
-	 * @param  string  $section_slug  Section slug used in tracking as `mtm_kwd=addon-badge-{slug}`.
-	 * @param  string  $product_url   Add-on product page URL.
+	 * @param  string  $section_slug  Section slug used in tracking as `mtm_kwd=pro-badge-{slug}`.
+	 * @param  string  $product_url   Unused. Kept for backward compatibility with existing call sites.
 	 * @param  string  $feature_slug  Feature slug checked against the settings access registry.
 	 */
 	public function get_addon_feature_badge_html( $section_slug = '', $product_url = '', $feature_slug = '' ) {
@@ -308,29 +294,7 @@ class FluidCheckout_Admin extends FluidCheckout {
 			return '';
 		}
 
-		$section_slug = sanitize_title( $section_slug );
-		$mtm_kwd = ! empty( $section_slug ) ? 'addon-badge-' . $section_slug : 'addon-badge';
-		$product_url = ! empty( $product_url ) ? $product_url : 'https://fluidcheckout.com/';
-
-		$url = add_query_arg(
-			array(
-				'mtm_campaign' => 'addons',
-				'mtm_kwd'      => $mtm_kwd,
-				'mtm_source'   => 'lite-plugin',
-			),
-			$product_url
-		);
-
-		$addon_badge_html = sprintf(
-			'<a class="fc-settings-promo-pill fc-settings-promo-pill--addon" href="%1$s" target="_blank" rel="noopener noreferrer">%2$s</a>',
-			esc_url( $url ),
-			esc_html( __( 'Add-on', 'fluid-checkout' ) )
-		);
-
-		// Also show a short PRO badge next to the add-on badge
-		$pro_badge_html = $this->get_pro_feature_badge_html( $section_slug, __( 'PRO', 'fluid-checkout' ) );
-
-		return $addon_badge_html . $pro_badge_html;
+		return $this->get_pro_feature_badge_html( $section_slug );
 	}
 
 	/**
@@ -359,7 +323,7 @@ class FluidCheckout_Admin extends FluidCheckout {
 	 * Used when PRO is installed so entitled customers are not nudged to pay again.
 	 */
 	public function get_addon_purchase_button_label_without_price() {
-		return __( 'Get this add-on', 'fluid-checkout' );
+		return __( 'Install add-on', 'fluid-checkout' );
 	}
 
 	/**
@@ -370,6 +334,13 @@ class FluidCheckout_Admin extends FluidCheckout {
 	public function get_pro_upgrade_button_label( $price = '129 EUR' ) {
 		/* translators: %s: formatted price including currency, e.g. "129 EUR" */
 		return sprintf( __( 'Upgrade to PRO &mdash; %s', 'fluid-checkout' ), $price );
+	}
+
+	/**
+	 * Get the upgrade button label for Fluid Checkout PRO without a price.
+	 */
+	public function get_pro_upgrade_button_label_without_price() {
+		return __( 'Upgrade to PRO', 'fluid-checkout' );
 	}
 
 	/**
@@ -428,19 +399,57 @@ class FluidCheckout_Admin extends FluidCheckout {
 	}
 
 	/**
-	 * Get HTML for documentation link to be used on settings descriptions.
+	 * Maybe append Matomo tracking query args to a Fluid Checkout documentation URL.
+	 *
+	 * @param  string  $url      Documentation URL.
+	 * @param  string  $mtm_kwd  Optional tracking keyword. Defaults to the last URL path segment.
 	 */
-	public function get_documentation_link_html( $url = 'https://fluidcheckout.com/docs/' ) {
+	public function maybe_add_documentation_mtm_args( $url, $mtm_kwd = '' ) {
+		// Bail if not a Fluid Checkout URL
+		if ( false === strpos( $url, 'fluidcheckout.com' ) ) { return $url; }
+
+		// Maybe derive keyword from the documentation URL path
+		if ( empty( $mtm_kwd ) ) {
+			$path = wp_parse_url( $url, PHP_URL_PATH );
+			$mtm_kwd = sanitize_title( basename( untrailingslashit( (string) $path ) ) );
+		}
+
+		// Fallback keyword
+		if ( empty( $mtm_kwd ) ) {
+			$mtm_kwd = 'docs';
+		}
+
+		return add_query_arg(
+			array(
+				'mtm_campaign' => 'settings-docs',
+				'mtm_kwd'      => $mtm_kwd,
+				'mtm_source'   => 'lite-plugin',
+			),
+			$url
+		);
+	}
+
+	/**
+	 * Get HTML for documentation link to be used on settings descriptions.
+	 *
+	 * @param  string  $url      Documentation URL.
+	 * @param  string  $mtm_kwd  Optional Matomo keyword for Fluid Checkout docs URLs.
+	 */
+	public function get_documentation_link_html( $url = 'https://fluidcheckout.com/docs/', $mtm_kwd = '' ) {
+		$url = $this->maybe_add_documentation_mtm_args( $url, $mtm_kwd );
+
 		return sprintf( '<a target="_blank" href="%s">%s</a>', esc_url( $url ), __( 'Read the documentation.', 'fluid-checkout' ) );
 	}
 
 	/**
 	 * Get HTML for a documentation info icon link, typically used in settings card headers.
 	 *
-	 * @param  string  $url  Documentation URL.
+	 * @param  string  $url      Documentation URL.
+	 * @param  string  $mtm_kwd  Optional Matomo keyword for Fluid Checkout docs URLs.
 	 */
-	public function get_documentation_icon_html( $url = 'https://fluidcheckout.com/docs/' ) {
+	public function get_documentation_icon_html( $url = 'https://fluidcheckout.com/docs/', $mtm_kwd = '' ) {
 		$label = __( 'View documentation', 'fluid-checkout' );
+		$url = $this->maybe_add_documentation_mtm_args( $url, $mtm_kwd );
 
 		return sprintf(
 			'<a class="fc-settings-docs-icon" href="%1$s" target="_blank" rel="noopener noreferrer" aria-label="%2$s" title="%2$s"><span class="dashicons dashicons-info-outline" aria-hidden="true"></span></a>',

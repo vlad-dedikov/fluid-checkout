@@ -356,6 +356,31 @@ The plugin provides widget areas in strategic positions on the checkout page for
 
 = Unreleased =
 
+* Removed: Option to disable the integrated coupon code section. It is always enabled when WooCommerce coupons are available.
+* Removed: "Upgrade to PRO to unlock more options" links from settings field descriptions.
+* Improved: Keep locked settings visible for discovery, and hide dependent settings only after PRO or add-ons unlock them.
+* Improved: Show usage tracking data groups as individual settings toggles instead of a checkbox group.
+* Removed: Checkbox group field nesting from the Fluid Checkout settings page. Each option uses its own toggle row.
+* Improved: Support comma-separated values, pipe-separated OR values, and multiple trigger ids (AND) in settings field conditionals, including triggers from other settings tabs without a page reload.
+* Improved: Show the option to display trust badge widgets only at the last step on mobile when checkout widget areas are enabled and the multi-step layout is selected.
+* Improved: Show logo image and header, page, and footer background colors only when the distraction free checkout template is selected.
+* Improved: Move documentation links for Design template, Cart items, and theme integrations to the section title info icon, and add tracking parameters to settings documentation links.
+* Added: Documentation info icon on the Address book, Google Address Autocomplete, and EU-VAT settings sections.
+* Improved: Split checkout Cart items and Place order into their own settings sections, and rename the edit cart items option label.
+* Improved: Show a focus outline on settings page buttons.
+* Improved: Rename add-on purchase buttons to Install add-on.
+* Improved: Rename add-on activate buttons to Activate add-on.
+* Improved: Links between Fluid Checkout settings tabs switch pages without a full reload.
+* Improved: Dashboard add-on cards hide purchase prices, show Learn more when only Lite is active, and keep Learn more beside Install when PRO is active but the add-on is not installed yet.
+* Improved: Disable Activate add-on when the add-on is installed but Fluid Checkout PRO is not activated.
+* Improved: Show Learn more beside Activate add-on when the add-on is installed but not activated.
+* Removed: Site key section from the License keys settings page.
+* Improved: Getting started checklist promotes PRO page optimizations, address autocomplete from Google Maps, and address book, completable only while PRO is active.
+* Improved: Address autocomplete checklist step completes when Google Maps is enabled with a tested API key, or when Brasil API is enabled.
+* Improved: Show the settings page preview column from 1280px viewport width.
+* Improved: Show Checkout layout before Design template on the Checkout settings page.
+* Improved: Getting started card on the Dashboard uses a numbered checklist that marks steps as complete when visited or when usage tracking is enabled.
+* Improved: Settings section headers show only the PRO badge, not the Add-on badge.
 * Improved: Use sentence case for settings menu items, page titles, section titles, and field labels.
 * Added: Guest checkout, login, and account creation options on the Customer accounts settings page, so they can use different values per settings profile.
 * Improved: Disable guest checkout, login, and account creation options on the WooCommerce Accounts settings page when Fluid Checkout is active, and point merchants to Customer accounts settings.
@@ -373,6 +398,7 @@ The plugin provides widget areas in strategic positions on the checkout page for
 * Improved: Show settings that are locked by a compatible plugin or theme as disabled, with a note explaining why the value cannot be changed.
 * Improved: Design template options use bordered radio boxes; checkout layout and columns use segmented buttons matching the settings design.
 * Improved: Split page templates, progress bar, and order summary into their own checkout settings sections.
+* Improved: Automatically detect whether "Add" link button labels should be lowercase based on the store language, instead of a setting.
 * Fixed: PRO-only settings values are forced back to Lite-compatible options when Fluid Checkout PRO is not active.
 * Fixed: Progress bar not showing the correct step when a hidden checkout step becomes visible again while incomplete.
 * Fixed: Proceed button being displayed instead of the edit and save buttons for an incomplete checkout step the user already passed.

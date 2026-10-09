@@ -17,11 +17,9 @@ class FluidCheckout_CouponCodes extends FluidCheckout {
 
 	/**
 	 * Check whether the feature is enabled or not.
+	 * Always enabled. WooCommerce coupon availability is checked separately where hooks are registered.
 	 */
 	public function is_feature_enabled() {
-		// Bail if feature is not enabled
-		if ( 'yes' !== FluidCheckout_Settings::instance()->get_option( 'fc_enable_checkout_coupon_codes' ) ) { return false; }
-
 		return true;
 	}
 
@@ -329,7 +327,7 @@ class FluidCheckout_CouponCodes extends FluidCheckout {
 		$coupon_code_toggle_label = null;
 		if ( $output_handle ) {
 			// Output coupon code field and button in an expansible form section
-			$coupon_code_toggle_label = 'yes' === FluidCheckout_Settings::instance()->get_option( 'fc_optional_fields_link_label_lowercase' ) ? strtolower( $coupon_code_field_label ) : $coupon_code_field_label;
+			$coupon_code_toggle_label = FluidCheckout_CheckoutHideOptionalFields::instance()->maybe_lowercase_add_link_label( $coupon_code_field_label );
 			/* translators: %s: Form field label */
 			$coupon_code_toggle_label = apply_filters( 'fc_expansible_section_toggle_label_' . $section_id, sprintf( __( 'Add %s', 'fluid-checkout' ), $coupon_code_toggle_label ) );
 		}

@@ -133,7 +133,6 @@ class FluidCheckout_Settings extends FluidCheckout {
 			'fc_enable_checkout_widget_areas'                               => 'yes',
 			'fc_enable_checkout_widget_area_sidebar_last_step'              => 'no',
 			'fc_enable_checkout_hide_optional_fields'                       => 'yes',
-			'fc_optional_fields_link_label_lowercase'                       => 'yes',
 			'fc_hide_optional_fields_skip_address_2'                        => 'no',
 			'fc_shipping_methods_substep_position'                          => 'after_shipping_address',
 			'fc_shipping_methods_disable_auto_select'                       => 'no',
@@ -161,7 +160,6 @@ class FluidCheckout_Settings extends FluidCheckout {
 			'fc_enable_checkout_gift_options'                               => 'no',
 			'fc_default_gift_options_expanded'                              => 'no',
 			'fc_display_gift_message_in_order_details'                      => 'no',
-			'fc_enable_checkout_coupon_codes'                               => 'yes',
 			'fc_display_coupon_code_section_title'                          => 'no',
 			'fc_pro_checkout_coupon_codes_position'                         => 'substep_before_payment',
 			'fc_pro_checkout_coupon_code_message_button_style'              => 'add_link_button',
@@ -219,6 +217,7 @@ class FluidCheckout_Settings extends FluidCheckout {
 			// Google Address Autocomplete (feature keys; FCGAA overrides when both active).
 			'fc_gaa_enabled'                                                => 'no',
 			'fc_gaa_google_places_api_key'                                  => '',
+			'fc_gaa_google_places_api_key_validated_hash'                   => '',
 			'fc_gaa_google_places_api_version'                              => 'current',
 			'fc_gaa_google_places_api_language'                             => '',
 			'fc_gaa_search_results_types'                                   => 'address',
@@ -1165,6 +1164,12 @@ class FluidCheckout_Settings extends FluidCheckout {
 		switch ( $type ) {
 			case 'checkbox':
 			case 'fc_telemetry_enable':
+				// Array checkbox options post multiple values under one field name
+				if ( array_key_exists( 'checkbox_value', $option ) ) {
+					$value = array_filter( array_map( 'wc_clean', (array) $raw_value ) );
+					break;
+				}
+
 				$value = ( '1' === $raw_value || 'yes' === $raw_value ) ? 'yes' : 'no';
 				break;
 
@@ -1176,7 +1181,6 @@ class FluidCheckout_Settings extends FluidCheckout {
 			case 'multiselect':
 			case 'multi_select_countries':
 			case 'fc_multiselect':
-			case 'fc_checkboxgroup':
 				$value = array_filter( array_map( 'wc_clean', (array) $raw_value ) );
 				break;
 
