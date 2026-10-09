@@ -20,7 +20,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 	const STORAGE_KEY = 'fcAdminSettingsPreview';
 
 	/**
-	 * Largest screen width of the compact layout, where the preview opens as a drawer.
+	 * Smallest screen width where the preview shows as a column, as narrower screens open it as a drawer.
 	 */
 	const COMPACT_BREAKPOINT = 1280;
 
@@ -244,7 +244,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			}
 
 			// Maybe expand the preview, except for the drawer of the compact layout
-			if ( layout && true === state.expanded && ! window.matchMedia( '(max-width: <?php echo absint( self::COMPACT_BREAKPOINT ); ?>px)' ).matches ) {
+			if ( layout && true === state.expanded && ! window.matchMedia( '(max-width: <?php echo absint( self::COMPACT_BREAKPOINT - 1 ); ?>px)' ).matches ) {
 				layout.classList.add( 'is-preview-expanded' );
 			}
 		} )();
