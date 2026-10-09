@@ -663,10 +663,11 @@
 	};
 
 	/**
-	 * Collapse the preview when crossing the compact breakpoint.
+	 * Close the drawer when entering the compact layout, and restore the expanded state saved in the browser when leaving it.
 	 */
 	var handleCompactBreakpointChange = function() {
-		setPreviewExpanded( false );
+		// Close the drawer, or restore the saved expanded state outside the compact layout
+		setPreviewExpanded( ! isCompactPreviewLayout() && true === getSavedState().expanded );
 		syncPreviewDrawerPosition();
 	};
 
