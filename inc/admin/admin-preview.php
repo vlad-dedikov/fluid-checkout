@@ -42,11 +42,35 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	const CART_ITEMS_LIMIT = 3;
 
 	/**
+	 * Admin AJAX action that saves the unsaved settings shown in the preview.
+	 */
+	const DRAFT_AJAX_ACTION = 'fc_admin_preview_save_draft';
+
+	/**
+	 * Prefix of the transients that keep the unsaved settings of each preview token.
+	 */
+	const DRAFT_TRANSIENT_PREFIX = 'fc_admin_preview_draft_';
+
+	/**
 	 * Whether the current request is a preview request, cached after first check.
 	 *
 	 * @var bool|null
 	 */
 	private $is_preview_request = null;
+
+	/**
+	 * Preview tokens created in the current request, by user ID.
+	 *
+	 * @var array
+	 */
+	private $tokens = array();
+
+	/**
+	 * Unsaved settings values of the current preview request, cached after first read.
+	 *
+	 * @var array|null
+	 */
+	private $draft_values = null;
 
 
 
@@ -69,6 +93,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Expired previews
 		add_action( 'init', array( $this, 'maybe_reject_expired_preview_request' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
 
+		// Unsaved settings
+		add_action( 'wp_ajax_' . self::DRAFT_AJAX_ACTION, array( $this, 'ajax_save_draft' ), 10 );
+
 		// Preview guards
 		$this->preview_guard_hooks();
 
@@ -77,6 +104,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Preview cart
 		$this->preview_cart_hooks();
+
+		// Preview settings
+		$this->preview_settings_hooks();
 	}
 
 	/**
@@ -204,25 +234,42 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_cart_items' ), 10 );
 	}
 
+	/**
+	 * Add or remove preview settings hooks.
+	 */
+	public function preview_settings_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Unsaved settings
+		add_filter( 'fc_settings_effective_values', array( $this, 'add_draft_values' ), 10 );
+
+		// Settings profiles
+		add_filter( 'fc_settings_context_profile', '__return_null', 100 ); // Late, to show the settings being edited instead of the settings profiles of experiments
+	}
+
 
 
 	/**
-	 * Create a preview token for the current user.
+	 * Get the preview token of the current user, created once per request so all preview URLs and the unsaved settings share it.
 	 * Self-contained so it also works when the frontend is on a different domain from the admin.
 	 *
 	 * @return  string  The preview token, or an empty string when the current user cannot use the preview.
 	 */
-	public function create_token() {
+	public function get_token() {
 		// Bail if the current user cannot use the preview
 		if ( ! current_user_can( self::CAPABILITY ) ) { return ''; }
 
 		// Get current user
 		$user = wp_get_current_user();
 
-		// Define token payload
-		$payload = $user->ID . '.' . ( time() + self::TOKEN_LIFETIME );
+		// Maybe create the token of the current user
+		if ( ! isset( $this->tokens[ $user->ID ] ) ) {
+			$payload = $user->ID . '.' . ( time() + self::TOKEN_LIFETIME );
+			$this->tokens[ $user->ID ] = $payload . '.' . $this->get_token_signature( $payload, $user );
+		}
 
-		return $payload . '.' . $this->get_token_signature( $payload, $user );
+		return $this->tokens[ $user->ID ];
 	}
 
 	/**
@@ -234,7 +281,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 */
 	public function get_preview_url( $url ) {
 		// Get preview token for the current user
-		$token = $this->create_token();
+		$token = $this->get_token();
 
 		// Bail if the current user cannot use the preview
 		if ( '' === $token ) { return ''; }
@@ -909,6 +956,79 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		}
 
 		WC()->session->set( 'cart', $cart_items );
+	}
+
+
+
+	/**
+	 * Get the name of the transient that keeps the unsaved settings of a preview token.
+	 *
+	 * @param   string  $token  Preview token.
+	 *
+	 * @return  string  Transient name.
+	 */
+	public function get_draft_transient_name( $token ) {
+		return self::DRAFT_TRANSIENT_PREFIX . md5( $token );
+	}
+
+	/**
+	 * Get the unsaved settings values of the current preview request.
+	 *
+	 * @return  array  Unsaved settings values by option name.
+	 */
+	public function get_draft_values() {
+		// Maybe read the unsaved settings, once per request
+		if ( null === $this->draft_values ) {
+			$draft_values = get_transient( $this->get_draft_transient_name( $this->get_request_token() ) );
+			$this->draft_values = is_array( $draft_values ) ? $draft_values : array();
+		}
+
+		return $this->draft_values;
+	}
+
+	/**
+	 * Add the unsaved settings values to the effective settings values.
+	 *
+	 * @param   array  $values  Effective settings values by option name.
+	 *
+	 * @return  array  Effective settings values with the unsaved values.
+	 */
+	public function add_draft_values( $values ) {
+		return array_merge( $values, $this->get_draft_values() );
+	}
+
+	/**
+	 * Save the unsaved settings posted from the settings page for a preview token, so its preview requests show them.
+	 */
+	public function ajax_save_draft() {
+		// Bail if the request nonce is not valid
+		check_ajax_referer( self::DRAFT_AJAX_ACTION, 'nonce' );
+
+		// Bail if the current user cannot use the preview
+		if ( ! current_user_can( self::CAPABILITY ) ) { wp_send_json_error( null, 403 ); }
+
+		// Get preview token
+		$token = isset( $_POST[ 'token' ] ) ? sanitize_text_field( wp_unslash( $_POST[ 'token' ] ) ) : '';
+
+		// Bail if the token is not a valid preview token of the current user
+		if ( get_current_user_id() !== $this->get_token_user_id( $token ) ) { wp_send_json_error( null, 403 ); }
+
+		// Get settings fields
+		$settings_page = FluidCheckout_Admin_Settings_Page::instance();
+		$settings = array();
+
+		// Iterate settings tabs, as all tabs are in the settings form
+		foreach ( $settings_page->get_tabs() as $tab => $tab_args ) {
+			// Skip separators and tabs without settings to save
+			if ( 'tab' !== $tab_args[ 'type' ] || ! $tab_args[ 'show_save_button' ] ) { continue; }
+
+			$settings = array_merge( $settings, $settings_page->get_saveable_settings( $settings_page->get_tab_settings( $tab ) ) );
+		}
+
+		// Keep the posted values, sanitized like when saving the settings, until the token expires
+		set_transient( $this->get_draft_transient_name( $token ), FluidCheckout_Settings::instance()->get_sanitized_settings_values( $settings ), self::TOKEN_LIFETIME );
+
+		wp_send_json_success();
 	}
 
 }

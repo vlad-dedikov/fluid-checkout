@@ -116,6 +116,14 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			'show_page_tabs'         => true,
 			'status_text'            => '',
 			'read_only_fields'       => true,
+			// Settings that only change the page styles, refreshed without reloading the preview
+			'style_settings'         => array(
+				'fc_checkout_secondary_column_background_color',
+				'fc_checkout_header_background_color',
+				'fc_checkout_page_background_color',
+				'fc_checkout_footer_background_color',
+				'fc_checkout_order_review_highlight_color',
+			),
 		);
 
 		/**
@@ -167,7 +175,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 	 * Register preview assets.
 	 */
 	public function register_assets() {
-		wp_register_script( 'fc-admin-settings-preview', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin/admin-settings-preview' ), array( 'fc-utils' ), NULL, array( 'in_footer' => true, 'strategy' => 'defer' ) );
+		wp_register_script( 'fc-admin-settings-preview', FluidCheckout_Enqueue::instance()->get_script_url( 'js/admin/admin-settings-preview' ), array( 'jquery', 'fc-utils' ), NULL, array( 'in_footer' => true, 'strategy' => 'defer' ) );
 		wp_add_inline_script( 'fc-admin-settings-preview', 'window.addEventListener("load",function(){FCAdminSettingsPreview.init(fcAdminSettingsPreviewSettings);});' );
 	}
 
@@ -206,6 +214,11 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 				'storageKey'             => self::STORAGE_KEY,
 				'compactBreakpoint'      => self::COMPACT_BREAKPOINT,
 				'viewportWidths'         => self::VIEWPORT_WIDTHS,
+				'ajaxUrl'                => admin_url( 'admin-ajax.php' ),
+				'draftAction'            => FluidCheckout_Admin_Preview::DRAFT_AJAX_ACTION,
+				'draftNonce'             => wp_create_nonce( FluidCheckout_Admin_Preview::DRAFT_AJAX_ACTION ),
+				'previewToken'           => FluidCheckout_Admin_Preview::instance()->get_token(),
+				'styleSettings'          => $config[ 'style_settings' ],
 				'i18n'                   => array(
 					'expand'               => __( 'Expand preview', 'fluid-checkout' ),
 					'collapse'             => __( 'Collapse preview', 'fluid-checkout' ),
@@ -428,6 +441,7 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 				<div class="fc-settings-preview__frame-wrap" data-fc-settings-preview-frame-wrap>
 					<p class="fc-settings-preview__dims" data-fc-settings-preview-dims aria-live="polite">&mdash;</p>
 					<button type="button" class="fc-settings-preview__zoom-hint" data-fc-settings-preview-zoom-hint hidden><?php echo esc_html( __( 'Expand preview for a closer look', 'fluid-checkout' ) ); ?></button>
+					<span class="spinner fc-settings-preview__spinner"></span>
 					<iframe
 						class="fc-settings-preview__frame"
 						data-fc-settings-preview-frame

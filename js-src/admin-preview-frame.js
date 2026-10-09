@@ -34,6 +34,7 @@
 
 		stylesId:                     'fc-admin-preview-styles',
 		probeId:                      'fc-admin-preview-probe',
+		customStylesId:               'fc-custom-styles',
 
 		inertActionSelector:          '#place_order, .fc-place-order-button, .fc-place-order__custom-buttons, .fc-express-checkout, .add_to_cart_button, .single_add_to_cart_button, .wc-block-components-product-button__button',
 		linkSelector:                 'a[href], area[href]',
@@ -264,6 +265,47 @@
 
 
 	/**
+	 * Refresh the custom styles of the page from a fresh render, such as after the admin page changes style settings, without reloading the page.
+	 */
+	var refreshCustomStyles = function() {
+		// Get a fresh render of the page, use its custom styles unless the request fails, then let the admin page know
+		fetch( root.location.href, { credentials: 'same-origin' } )
+			.then( function( response ) { return response.ok ? response.text() : Promise.reject( response ); } )
+			.then( replaceCustomStyles )
+			.then( sendStylesRefreshedMessage, sendStylesRefreshedMessage );
+	};
+
+	/**
+	 * Replace the custom styles of the page with the custom styles of a fresh render.
+	 *
+	 * @param {string}  html  HTML of the fresh render.
+	 */
+	var replaceCustomStyles = function( html ) {
+		var newStyleElement = new DOMParser().parseFromString( html, 'text/html' ).getElementById( _settings.customStylesId );
+		var styleElement = document.getElementById( _settings.customStylesId );
+
+		// Maybe add the custom styles element, as pages without custom styles have none
+		if ( ! styleElement ) {
+			styleElement = document.createElement( 'style' );
+			styleElement.id = _settings.customStylesId;
+			document.head.appendChild( styleElement );
+		}
+
+		// Replace the custom styles, or clear them when the fresh render has none
+		styleElement.textContent = newStyleElement ? newStyleElement.textContent : '';
+	};
+
+	/**
+	 * Send the styles refreshed message to the admin page, which shows the page preview as busy until then.
+	 */
+	var sendStylesRefreshedMessage = function() {
+		// Send styles refreshed message to the admin page
+		root.parent.postMessage( { source: _settings.messageSource, type: 'stylesRefreshed' }, _settings.adminOrigin );
+	};
+
+
+
+	/**
 	 * Maybe stop a link from navigating away from the preview page.
 	 *
 	 * @param {Event}              e     Click or auxiliary click event.
@@ -389,6 +431,14 @@
 		// GET COMPUTED CSS VALUE
 		else if ( 'getComputedCssValue' === e.data.type ) {
 			sendComputedCssValue( e.data.requestId, e.data.property, e.data.value );
+		}
+		// REFRESH STYLES
+		else if ( 'refreshStyles' === e.data.type ) {
+			refreshCustomStyles();
+		}
+		// RELOAD
+		else if ( 'reload' === e.data.type ) {
+			root.location.reload();
 		}
 	};
 

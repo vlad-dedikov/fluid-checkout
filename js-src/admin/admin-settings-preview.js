@@ -3,6 +3,7 @@
  * Expand/collapse, viewport size, page tabs, and visibility by settings tab.
  *
  * DEPENDS ON:
+ * - jQuery // Settings field changes, as the color picker triggers them with jQuery
  * - FCUtils // Utility functions
  */
 
@@ -20,6 +21,9 @@
 
 	'use strict';
 
+	var $ = jQuery;
+	var _hasJQuery = ( $ != null );
+
 	var _hasInitialized = false;
 	var _publicMethods = {};
 	var _previewWidth = 0;
@@ -31,7 +35,16 @@
 	var _bodyClasses = {};
 	var _computedCssValueRequests = {};
 	var _computedCssValueRequestId = 0;
+	var _isPreviewLoading = false;
+	var _isPreviewReady = false;
+	var _isRefreshingStyles = false;
+	var _hasUnsavedDraft = false;
+	var _isSavingDraft = false;
+	var _needsRefresh = false;
+	var _needsReload = false;
+	var _saveDraftDebounced = null;
 	var _settings = {
+		formSelector:                '[data-fc-settings-form]',
 		layoutSelector:              '[data-fc-settings-layout]',
 		previewSelector:             '[data-fc-settings-preview]',
 		expandSelector:              '[data-fc-settings-preview-expand]',
@@ -53,6 +66,7 @@
 		isEnterClass:                'is-preview-enter',
 		isCollapsingClass:           'is-preview-collapsing',
 		isActiveClass:               'is-active',
+		isBusyClass:                 'is-busy',
 		pageAttribute:               'data-fc-settings-preview-page',
 		urlAttribute:                'data-fc-settings-preview-url',
 		viewportWidths:              { mobile: 350, tablet: 750, desktop: 1000 },
@@ -75,6 +89,12 @@
 		guestMode:                   'guest',
 		messageSource:               'fc-admin-preview',
 		storageKey:                  'fcAdminSettingsPreview',
+		ajaxUrl:                     '',
+		draftAction:                 'fc_admin_preview_save_draft',
+		draftNonce:                  '',
+		previewToken:                '',
+		styleSettings:               [],
+		draftSaveDelay:              300,
 		i18n: {
 			expand:                  'Expand preview',
 			collapse:                'Collapse preview',
@@ -481,11 +501,13 @@
 		if ( ! url ) {
 			frame.setAttribute( 'srcdoc', _settings.placeholderSrcdocs[ page ] );
 			frame.removeAttribute( 'src' );
+			markPreviewLoading();
 		}
 		// Otherwise, maybe load the page preview, unless it is already loaded
 		else if ( previewUrl !== frame.getAttribute( 'src' ) ) {
 			frame.setAttribute( 'src', previewUrl );
 			frame.removeAttribute( 'srcdoc' );
+			markPreviewLoading();
 		}
 	};
 
@@ -713,6 +735,113 @@
 
 
 	/**
+	 * Mark the page preview as loading a page, which shows the unsaved settings saved so far.
+	 */
+	var markPreviewLoading = function() {
+		_isPreviewLoading = true;
+		_isPreviewReady = false;
+		_isRefreshingStyles = false;
+		_needsRefresh = false;
+
+		// Show the page preview as busy while it loads
+		updatePreviewBusyState();
+	};
+
+	/**
+	 * Show whether the page preview is busy, while it loads or until it shows the unsaved settings.
+	 */
+	var updatePreviewBusyState = function() {
+		var frameWrap = document.querySelector( _settings.frameWrapSelector );
+		var isBusy = _hasUnsavedDraft || _isSavingDraft || _needsRefresh || _isPreviewLoading || _isRefreshingStyles;
+
+		// Bail if the frame wrap is missing
+		if ( ! frameWrap ) { return; }
+
+		// Dim the page preview and show the spinner
+		frameWrap.classList.toggle( _settings.isBusyClass, isBusy );
+		frameWrap.setAttribute( 'aria-busy', isBusy ? 'true' : 'false' );
+	};
+
+
+
+	/**
+	 * Save the unsaved settings for the page preview, which shows them once refreshed.
+	 */
+	var saveDraft = function() {
+		var formData;
+
+		// Bail if a request is saving, which saves again once it finishes, so an older request cannot overwrite newer values
+		if ( _isSavingDraft ) { return; }
+
+		// Send the settings form values
+		_hasUnsavedDraft = false;
+		_isSavingDraft = true;
+		formData = new FormData( document.querySelector( _settings.formSelector ) );
+		formData.set( 'action', _settings.draftAction );
+		formData.set( 'nonce', _settings.draftNonce );
+		formData.set( 'token', _settings.previewToken );
+		fetch( _settings.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: formData } ).then( handleDraftSaved, handleDraftSaved );
+	};
+
+	/**
+	 * Handle the end of a request saving the unsaved settings.
+	 *
+	 * @param  {Response|Error}  response  Fetch response, or the error when the request failed.
+	 */
+	var handleDraftSaved = function( response ) {
+		_isSavingDraft = false;
+
+		// Maybe save the changes made during the request
+		if ( _hasUnsavedDraft ) {
+			saveDraft();
+		}
+		// Otherwise, maybe refresh the page preview, unless the request failed
+		else if ( response && response.ok ) {
+			_needsRefresh = true;
+			maybeRefreshPreview();
+		}
+
+		// Show whether the page preview is busy
+		updatePreviewBusyState();
+	};
+
+	/**
+	 * Maybe refresh the page preview with the unsaved settings, once it is not loading or refreshing its styles, as the page preview would miss the messages sent meanwhile.
+	 */
+	var maybeRefreshPreview = function() {
+		var frame = document.querySelector( _settings.frameSelector );
+
+		// Bail if nothing to refresh, or the page preview is loading or refreshing its styles
+		if ( ! _needsRefresh || _isPreviewLoading || _isRefreshingStyles ) { return; }
+
+		_needsRefresh = false;
+
+		// Maybe skip placeholders, as page previews show the unsaved settings when they load
+		if ( ! getPreviewOrigin() ) {
+			_needsReload = false;
+		}
+		// Otherwise, maybe refresh only the styles of the page preview
+		else if ( ! _needsReload && _isPreviewReady ) {
+			_isRefreshingStyles = true;
+			postMessageToPreview( { type: 'refreshStyles' } );
+		}
+		// Otherwise, maybe reload the page preview from its page, which keeps the scroll position
+		else if ( _isPreviewReady ) {
+			_needsReload = false;
+			postMessageToPreview( { type: 'reload' } );
+			markPreviewLoading();
+		}
+		// Otherwise reload the iframe, for pages without the frame script such as error pages
+		else {
+			_needsReload = false;
+			frame.setAttribute( 'src', frame.getAttribute( 'src' ) );
+			markPreviewLoading();
+		}
+	};
+
+
+
+	/**
 	 * Handle expand button clicks.
 	 *
 	 * @param  {Event}  e  Click event.
@@ -886,6 +1015,46 @@
 	};
 
 	/**
+	 * Handle settings field changes.
+	 *
+	 * @param  {Event}  e  jQuery change event.
+	 */
+	var handleSettingsChange = function( e ) {
+		// Bail if the change is not for a settings field, such as for the preview controls
+		if ( ! e.target.closest( _settings.formSelector ) || e.target.closest( _settings.previewSelector ) ) { return; }
+
+		// Bail if the current user has no preview token
+		if ( ! _settings.previewToken ) { return; }
+
+		// Maybe reload the page preview, unless the field only changes styles
+		if ( -1 === _settings.styleSettings.indexOf( e.target.name ) ) {
+			_needsReload = true;
+		}
+
+		// Save the unsaved settings once the changes stop, showing the page preview as busy until it shows them
+		_hasUnsavedDraft = true;
+		_saveDraftDebounced();
+		updatePreviewBusyState();
+	};
+
+	/**
+	 * Handle iframe load events, including pages without the frame script such as placeholders and error pages.
+	 *
+	 * @param  {Event}  e  Load event.
+	 */
+	var handleFrameLoad = function( e ) {
+		// Bail if the load event is not for the iframe
+		if ( ! e.target.matches( _settings.frameSelector ) ) { return; }
+
+		_isPreviewLoading = false;
+		_isRefreshingStyles = false;
+
+		// Refresh the page preview with the settings saved while it loaded
+		maybeRefreshPreview();
+		updatePreviewBusyState();
+	};
+
+	/**
 	 * Handle messages from the page preview and route to the appropriate handler.
 	 *
 	 * @param  {MessageEvent}  e  Message event.
@@ -898,7 +1067,14 @@
 
 		// READY
 		if ( 'ready' === e.data.type ) {
+			_isPreviewReady = true;
 			sendPreviewState();
+		}
+		// STYLES REFRESHED
+		else if ( 'stylesRefreshed' === e.data.type ) {
+			_isRefreshingStyles = false;
+			maybeRefreshPreview();
+			updatePreviewBusyState();
 		}
 		// COMPUTED CSS VALUE
 		else if ( 'computedCssValue' === e.data.type ) {
@@ -1046,10 +1222,19 @@
 		document.addEventListener( 'change', handleModeChange, true );
 		document.addEventListener( 'click', handleHeaderFooterClick, true );
 		window.addEventListener( 'message', handleMessage );
+		document.addEventListener( 'load', handleFrameLoad, true ); // Load events do not bubble, but reach the document in the capture phase
 		window.addEventListener( 'fcSettingsTabActivated', handleSettingsTabActivated );
 		// Capture scroll from nested containers; keep the drawer aligned while sticky headers move
 		window.addEventListener( 'scroll', syncPreviewDrawerPosition, true );
 		window.addEventListener( 'resize', syncPreviewDrawerPosition );
+
+		// Save the unsaved settings once changes stop, such as while dragging the color picker
+		_saveDraftDebounced = FCUtils.debounce( saveDraft, _settings.draftSaveDelay );
+
+		// Add jQuery event listeners, as the color picker triggers settings field changes with jQuery
+		if ( _hasJQuery ) {
+			$( document.body ).on( 'change', handleSettingsChange );
+		}
 
 		// Maybe fit the page preview in the frame when the panel size changes, such as when expanding the preview
 		panel = document.querySelector( _settings.panelSelector );
