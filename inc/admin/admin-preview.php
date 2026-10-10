@@ -205,7 +205,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		if ( ! $this->is_preview_request() ) { return; }
 
 		// Preview customer
-		add_action( 'init', array( $this, 'switch_to_preview_customer' ), -100 ); // Before WooCommerce sets up the session and customer at priority `0`
+		add_action( 'after_setup_theme', array( $this, 'switch_to_preview_customer' ), 15 ); // Before Fluid Checkout add-ons load at priority `20`, as some check whether the visitor is logged in while loading
 
 		// Session
 		add_filter( 'woocommerce_session_handler', array( $this, 'get_session_handler_class' ), 100 ); // Late to override session handlers from other plugins
