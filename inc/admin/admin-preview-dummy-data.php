@@ -219,7 +219,7 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 	}
 
 	/**
-	 * Get the meta values of the dummy logged-in customer: its role, name and saved addresses.
+	 * Get the meta values of the dummy logged-in customer: its role, name, and billing and shipping addresses.
 	 *
 	 * @return  array  Meta values by meta key.
 	 */
@@ -232,12 +232,19 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 		// Define role meta value, read when the dummy customer becomes the current user
 		$meta = array( $wpdb->get_blog_prefix() . 'capabilities' => array( 'customer' => true ) );
 
-		// Bail with the role only until WooCommerce sets up its countries at `init`, as the saved addresses need them
+		// Bail with the role only until WooCommerce sets up its countries at `init`, as the addresses need them
 		if ( ! WC()->countries instanceof WC_Countries ) { return $meta; }
 
 		// Cache the role only while getting the addresses, as country filters from other plugins may read this meta again
 		$this->customer_meta = $meta;
+
+		// Cache the meta values before filtering, as filter callbacks may read them again
 		$this->customer_meta = array_merge( $meta, $this->get_customer_name(), $this->get_customer_fields() );
+
+		/**
+		 * Filter the meta values of the dummy logged-in customer in the admin preview.
+		 */
+		$this->customer_meta = (array) apply_filters( 'fc_admin_preview_dummy_customer_meta', $this->customer_meta );
 
 		return $this->customer_meta;
 	}
