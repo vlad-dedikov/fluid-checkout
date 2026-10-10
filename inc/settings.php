@@ -595,8 +595,8 @@ class FluidCheckout_Settings extends FluidCheckout {
 	 */
 	public function get_effective_values() {
 		/**
-		 * Filter the effective settings values for the current request, such as to overlay unsaved values in the admin preview.
-		 * Applied after the cache, so the values overlaid are never cached.
+		 * Filter the effective settings values for the current request.
+		 * Applied after the cache, so filtered values are never cached.
 		 */
 		return apply_filters( 'fc_settings_effective_values', $this->get_stored_effective_values() );
 	}

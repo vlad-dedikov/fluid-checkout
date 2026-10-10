@@ -189,7 +189,7 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 		$this->customer_address = $address;
 
 		/**
-		 * Filter the address of the dummy customer in the admin preview, for example to fill required fields added by other plugins.
+		 * Filter the address of the dummy customer in the admin preview.
 		 */
 		$this->customer_address = apply_filters( 'fc_admin_preview_dummy_customer_address', $address );
 
@@ -263,7 +263,7 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 			$this->order_fields = array();
 
 			/**
-			 * Filter the values of the order fields the dummy customer fills at checkout in the admin preview, for example to fill order fields added by other plugins.
+			 * Filter the values of the order fields the dummy customer fills at checkout in the admin preview.
 			 */
 			$this->order_fields = (array) apply_filters( 'fc_admin_preview_dummy_order_fields', array(
 				'order_comments'    => _x( 'Please leave the package at the front door.', 'Dummy order notes in the admin preview', 'fluid-checkout' ),

@@ -552,7 +552,7 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 	 */
 	public function get_frame_script_settings() {
 		/**
-		 * Filter the settings of the admin preview frame script, for example to make more payment buttons inert.
+		 * Filter the settings of the admin preview frame script.
 		 */
 		return apply_filters( 'fc_admin_preview_frame_script_settings', array(
 			'adminOrigin'                 => $this->get_admin_origin(),
