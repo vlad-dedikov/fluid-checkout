@@ -110,6 +110,9 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 		// Preview cart
 		$this->preview_cart_hooks();
 
+		// Preview orders
+		$this->preview_order_hooks();
+
 		// Preview settings
 		$this->preview_settings_hooks();
 	}
@@ -240,6 +243,22 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Shipping methods
 		add_action( 'woocommerce_load_cart_from_session', array( $this, 'maybe_set_preview_shipping_methods' ), 10 );
+	}
+
+	/**
+	 * Add or remove preview order hooks.
+	 */
+	public function preview_order_hooks() {
+		// Bail if not a preview request
+		if ( ! $this->is_preview_request() ) { return; }
+
+		// Dummy orders
+		add_action( 'woocommerce_init', array( $this, 'use_preview_order_factory' ), 10 ); // After WooCommerce creates its order factory
+
+		// Dummy order meta
+		add_filter( 'add_post_metadata', array( $this, 'maybe_skip_dummy_order_meta_write' ), 10, 2 );
+		add_filter( 'update_post_metadata', array( $this, 'maybe_skip_dummy_order_meta_write' ), 10, 2 );
+		add_filter( 'delete_post_metadata', array( $this, 'maybe_skip_dummy_order_meta_write' ), 10, 2 );
 	}
 
 	/**
@@ -976,6 +995,28 @@ class FluidCheckout_Admin_Preview extends FluidCheckout {
 
 		// Set the chosen shipping methods, by package index
 		WC()->session->set( 'chosen_shipping_methods', wc_clean( wp_unslash( $_GET[ self::SHIPPING_METHODS_QUERY_ARG ] ) ) );
+	}
+
+
+
+	/**
+	 * Use the preview order factory, which also gets the dummy orders shown on the order received and order pay pages.
+	 */
+	public function use_preview_order_factory() {
+		WC()->order_factory = new FluidCheckout_Admin_Preview_Order_Factory();
+	}
+
+	/**
+	 * Skip writing post meta values of the dummy orders to the database, as plugins write order meta with post meta functions on the order received page, such as to remember tracked purchases.
+	 *
+	 * @param   null|bool  $check    Whether to skip writing, `null` to write the meta value.
+	 * @param   int        $post_id  Post ID.
+	 */
+	public function maybe_skip_dummy_order_meta_write( $check, $post_id ) {
+		// Bail if not a dummy order
+		if ( ! FluidCheckout_Admin_Preview_Dummy_Data::instance()->is_dummy_order_id( $post_id ) ) { return $check; }
+
+		return true;
 	}
 
 

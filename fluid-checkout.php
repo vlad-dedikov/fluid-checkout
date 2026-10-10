@@ -598,6 +598,8 @@ class FluidCheckout {
 		require_once self::$directory_path . 'inc/admin/admin-preview.php';
 		require_once self::$directory_path . 'inc/admin/admin-preview-dummy-data.php';
 		require_once self::$directory_path . 'inc/admin/admin-preview-dummy-product.php';
+		require_once self::$directory_path . 'inc/admin/admin-preview-dummy-order.php';
+		require_once self::$directory_path . 'inc/admin/admin-preview-order-factory.php';
 		require_once self::$directory_path . 'inc/admin/admin-preview-session-handler.php';
 
 		// Load each features

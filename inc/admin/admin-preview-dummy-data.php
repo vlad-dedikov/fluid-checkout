@@ -2,7 +2,7 @@
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Dummy customer and product data for the admin preview, which exists in memory only.
+ * Dummy customer, product and order data for the admin preview, which exists in memory only.
  */
 class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 
@@ -20,6 +20,26 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 	 * First product ID used for dummy products, high enough to never belong to a real product.
 	 */
 	const PRODUCT_ID_START = 2147483600;
+
+	/**
+	 * Order ID of the dummy paid order shown on the order received page, high enough to never belong to a real order.
+	 */
+	const ORDER_RECEIVED_ID = 2147483500;
+
+	/**
+	 * Order ID of the dummy order waiting for payment shown on the order pay page, high enough to never belong to a real order.
+	 */
+	const ORDER_PAY_ID = 2147483501;
+
+	/**
+	 * Order key of the dummy orders, within the 22 characters WooCommerce keeps.
+	 */
+	const ORDER_KEY = 'wc_order_fcpreview';
+
+	/**
+	 * Order number shown for the dummy orders, the same as in the WooCommerce email preview.
+	 */
+	const ORDER_NUMBER = '12345';
 
 	/**
 	 * Dummy customer address, cached after first retrieval.
@@ -313,6 +333,149 @@ class FluidCheckout_Admin_Preview_Dummy_Data extends FluidCheckout {
 			'catalog_visibility'     => 'hidden',
 			'price'                  => $price,
 		), $props );
+	}
+
+
+
+	/**
+	 * Check whether an order ID belongs to a dummy order.
+	 *
+	 * @param   int  $order_id  Order ID.
+	 *
+	 * @return  bool
+	 */
+	public function is_dummy_order_id( $order_id ) {
+		return in_array( (int) $order_id, array( self::ORDER_RECEIVED_ID, self::ORDER_PAY_ID ), true );
+	}
+
+	/**
+	 * Get the properties of a dummy order placed by the dummy customer, paid for the order received page or waiting for payment for the order pay page.
+	 *
+	 * @param   int  $order_id  Dummy order ID.
+	 *
+	 * @return  array  Order properties as accepted by `WC_Order::set_props()`.
+	 */
+	public function get_order_props( $order_id ) {
+		// Bail if not a dummy order
+		if ( ! $this->is_dummy_order_id( $order_id ) ) { return array(); }
+
+		// Get enabled payment methods, as checking which are available on the order pay page would load the dummy order being built
+		$payment_gateways = wp_list_filter( WC()->payment_gateways()->payment_gateways(), array( 'enabled' => 'yes' ) );
+
+		// Get order fields, with the order notes saved as the customer note
+		$order_fields = $this->get_order_fields();
+
+		return array_merge( $this->get_customer_fields(), array(
+			'order_key'              => self::ORDER_KEY,
+			'status'                 => self::ORDER_PAY_ID === (int) $order_id ? 'pending' : 'processing',
+			'customer_id'            => FluidCheckout_Admin_Preview::MODE_LOGGED_IN === FluidCheckout_Admin_Preview::instance()->get_preview_mode() ? self::CUSTOMER_ID : 0,
+			'created_via'            => 'checkout',
+			'currency'               => get_woocommerce_currency(),
+			'prices_include_tax'     => wc_prices_include_tax(),
+			'payment_method'         => empty( $payment_gateways ) ? '' : reset( $payment_gateways ),
+			'customer_note'          => array_key_exists( 'order_comments', $order_fields ) ? $order_fields[ 'order_comments' ] : '',
+			'date_created'           => time(),
+			'date_paid'              => self::ORDER_PAY_ID === (int) $order_id ? null : time(),
+		) );
+	}
+
+	/**
+	 * Get the meta data of the dummy orders, with the fields that have no order property, as checkout saves them.
+	 *
+	 * @return  array  Meta values by meta key.
+	 */
+	public function get_order_meta() {
+		// Define meta data
+		$order_meta = array();
+
+		// Iterate customer fields, saving fields without an order property with an underscore prefix, like WooCommerce does at checkout
+		foreach ( $this->get_customer_fields() as $field_key => $value ) {
+			// Skip fields saved as order properties
+			if ( method_exists( 'WC_Order', 'set_' . $field_key ) ) { continue; }
+
+			$order_meta[ '_' . $field_key ] = $value;
+		}
+
+		// Iterate order fields, saving them with their field key, like plugins usually save order fields
+		foreach ( $this->get_order_fields() as $field_key => $value ) {
+			// Skip the order notes, saved as the customer note
+			if ( 'order_comments' === $field_key ) { continue; }
+
+			$order_meta[ $field_key ] = $value;
+		}
+
+		return $order_meta;
+	}
+
+	/**
+	 * Get the order updates the store sent to the dummy customer, which customers see with their orders.
+	 *
+	 * @return  WP_Comment[]  Customer order notes.
+	 */
+	public function get_customer_order_notes() {
+		return array(
+			new WP_Comment( (object) array(
+				'comment_ID'             => 0,
+				'comment_content'        => _x( 'We received your order and will send you an update when it ships.', 'Dummy order update in the admin preview', 'fluid-checkout' ),
+				'comment_date'           => current_time( 'mysql' ),
+				'comment_type'           => 'order_note',
+				'comment_approved'       => '1',
+			) ),
+		);
+	}
+
+	/**
+	 * Get the downloads of a dummy order: a user guide for its first product.
+	 *
+	 * @param   WC_Order  $order  Dummy order.
+	 *
+	 * @return  array  Downloads, as returned by `WC_Order::get_downloadable_items()`.
+	 */
+	public function get_order_downloads( $order ) {
+		// Get first order item
+		$items = $order->get_items();
+		$item = reset( $items );
+
+		// Bail if the order has no products
+		if ( ! $item ) { return array(); }
+
+		// Get product and download name
+		$product = $item->get_product();
+		$download_name = _x( 'User guide', 'Dummy download in the admin preview', 'fluid-checkout' );
+
+		return array(
+			array(
+				'download_url'           => '#',
+				'download_id'            => 'fc-preview-user-guide',
+				'product_id'             => $item->get_product_id(),
+				'product_name'           => $item->get_name(),
+				'product_url'            => $product && $product->is_visible() ? $product->get_permalink() : '',
+				'download_name'          => $download_name,
+				'order_id'               => $order->get_id(),
+				'order_key'              => $order->get_order_key(),
+				'downloads_remaining'    => '',
+				'access_expires'         => null,
+				'file'                   => array( 'name' => $download_name, 'file' => '' ),
+			),
+		);
+	}
+
+	/**
+	 * Get the order received page URL of the dummy paid order.
+	 *
+	 * @return  string
+	 */
+	public function get_order_received_url() {
+		return add_query_arg( 'key', self::ORDER_KEY, wc_get_endpoint_url( 'order-received', self::ORDER_RECEIVED_ID, wc_get_checkout_url() ) );
+	}
+
+	/**
+	 * Get the order pay page URL of the dummy order waiting for payment.
+	 *
+	 * @return  string
+	 */
+	public function get_order_pay_url() {
+		return add_query_arg( array( 'pay_for_order' => 'true', 'key' => self::ORDER_KEY ), wc_get_endpoint_url( 'order-pay', self::ORDER_PAY_ID, wc_get_checkout_url() ) );
 	}
 
 }

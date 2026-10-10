@@ -86,12 +86,12 @@ class FluidCheckout_Admin_Settings_Preview extends FluidCheckout {
 			'order_received' => array(
 				'label'        => __( 'Thank you', 'fluid-checkout' ),
 				'requires_pro' => ! $is_pro_activated,
-				'url'          => '', // Not previewed yet, as the page needs an order
+				'url'          => FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_order_received_url(),
 			),
 			'order_pay'      => array(
 				'label'        => __( 'Order pay', 'fluid-checkout' ),
 				'requires_pro' => ! $is_pro_activated,
-				'url'          => '', // Not previewed yet, as the page needs an order
+				'url'          => FluidCheckout_Admin_Preview_Dummy_Data::instance()->get_order_pay_url(),
 			),
 		);
 
